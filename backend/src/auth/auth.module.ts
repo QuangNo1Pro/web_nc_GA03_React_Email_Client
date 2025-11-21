@@ -10,12 +10,14 @@ import { LocalStrategy } from './local.strategy';
 import { JwtStrategy } from './jwt.strategy';
 import { JwtRefreshTokenStrategy } from './jwt-refresh.strategy';
 import { GoogleStrategy } from './google.strategy';
+import { GmailModule } from '../gmail/gmail.module';
 
 @Module({
   imports: [
     UsersModule,
     PassportModule,
     ConfigModule,
+    GmailModule,
     JwtModule.registerAsync({
       imports: [ConfigModule],
       useFactory: async (configService: ConfigService) => ({

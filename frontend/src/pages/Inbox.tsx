@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
+import toast from 'react-hot-toast';
 import * as ReactWindow from 'react-window';
 import { api } from '../services/api';
 import './Inbox.css';
@@ -29,7 +30,7 @@ import {
   FolderArrowRight20Regular
 } from '@fluentui/react-icons';
 
-const mailboxIcons = {
+const mailboxIcons: { [key: string]: JSX.Element } = {
   inbox: <FiInbox />,
   starred: <FaRegStar />,
   sent: <FiSend />,
@@ -37,23 +38,47 @@ const mailboxIcons = {
   archive: <FiArchive />,
   trash: <FiTrash2 />,
   spam: <FiFolder />,
-  custom1: <FiFolder />,
-  custom2: <FiFolder />,
+  default: <FiFolder />,
 };
 
 const fetchMailboxes = async () => {
-  const { data } = await api.get('/mail/mailboxes');
+  const { data } = await api.get('/gmail/mailboxes');
   return data;
 };
 
 const fetchEmails = async (mailboxId: string) => {
-  const { data } = await api.get(`/mail/mailboxes/${mailboxId}/emails`);
-  return data.emails || []; // Backend trả về { emails, total, page, pageSize }
+  const { data } = await api.get(`/gmail/mailboxes/${mailboxId}/emails`);
+  return data; // Gmail API returns { messages, nextPageToken, resultSizeEstimate }
 };
 
 const fetchEmail = async (emailId: string) => {
-  const { data } = await api.get(`/mail/emails/${emailId}`);
+  const { data } = await api.get(`/gmail/emails/${emailId}`);
   return data;
+};
+
+const parseEmail = (email: any) => {
+  const headers = email.payload.headers;
+  const fromHeader = headers.find((h: any) => h.name === 'From')?.value || '';
+  const subjectHeader =
+    headers.find((h: any) => h.name === 'Subject')?.value || '';
+  const dateHeader = headers.find((h: any) => h.name === 'Date')?.value || '';
+
+  const sender = fromHeader.replace(/<.*>/, '').trim();
+  const subject = subjectHeader;
+  const timestamp = new Date(dateHeader).toISOString();
+  const starred = email.labelIds.includes('STARRED');
+  const read = !email.labelIds.includes('UNREAD');
+  const preview = email.snippet;
+
+  return {
+    id: email.id,
+    sender,
+    subject,
+    timestamp,
+    starred,
+    read,
+    preview,
+  };
 };
 
 // Helper function to get consistent color for avatar based on sender name
@@ -258,6 +283,7 @@ export default function Inbox() {
     queryKey: ['emails', selectedMailbox],
     queryFn: () => fetchEmails(selectedMailbox),
     enabled: !!selectedMailbox,
+    select: (data) => data.messages.map(parseEmail),
   });
 
   const {
@@ -426,7 +452,7 @@ export default function Inbox() {
     });
     
     try {
-      await api.patch(`/mail/emails/${emailId}/star`, { starred: newStarred });
+      await api.patch(`/gmail/emails/${emailId}/star`, { starred: newStarred });
       // Invalidate TẤT CẢ để đồng bộ với backend
       queryClient.invalidateQueries({ queryKey: ['mailboxes'] });
       queryClient.invalidateQueries({ queryKey: ['emails', selectedMailbox] });
@@ -448,7 +474,7 @@ export default function Inbox() {
           e.id === emailId ? { ...e, starred: !newStarred } : e
         );
       });
-      alert('Lỗi cập nhật trạng thái starred!');
+      toast.error('Lỗi cập nhật trạng thái starred!');
     }
   };
 
@@ -478,7 +504,7 @@ export default function Inbox() {
     }
     
     try {
-      await api.patch(`/mail/emails/${emailId}/read`, { read: newRead });
+      await api.patch(`/gmail/emails/${emailId}/read`, { read: newRead });
       // Invalidate TẤT CẢ để đồng bộ với backend (backend đã tự động cập nhật count)
       queryClient.invalidateQueries({ queryKey: ['mailboxes'] });
       queryClient.invalidateQueries({ queryKey: ['emails', selectedMailbox] });
@@ -497,7 +523,7 @@ export default function Inbox() {
           e.id === emailId ? { ...e, read: !newRead } : e
         );
       });
-      alert('Lỗi cập nhật trạng thái đã đọc/chưa đọc!');
+      toast.error('Lỗi cập nhật trạng thái đã đọc/chưa đọc!');
     }
   };
 
@@ -601,15 +627,14 @@ export default function Inbox() {
       ? `Xóa vĩnh viễn ${emailsToDelete.length} email? (Không thể khôi phục)`
       : `Chuyển ${emailsToDelete.length} email vào thùng rác?`;
     
-    if (!confirm(confirmMessage)) return;
-    
-    try {
-      await api.delete('/mail/emails', { 
-        data: { ids: emailsToDelete } 
-      });
-      
-      // Invalidate cache để refresh danh sách
-      queryClient.invalidateQueries({ queryKey: ['emails', selectedMailbox] });
+        if (!confirm(confirmMessage)) return;
+        
+        try {
+          await api.delete('/gmail/emails', {
+            data: { ids: emailsToDelete }
+          });
+          
+          // Invalidate cache để refresh danh sách      queryClient.invalidateQueries({ queryKey: ['emails', selectedMailbox] });
       queryClient.invalidateQueries({ queryKey: ['mailboxes'] });
       
       // Nếu chuyển vào trash, invalidate trash queries
@@ -627,10 +652,10 @@ export default function Inbox() {
       const successMessage = isInTrash 
         ? 'Đã xóa vĩnh viễn!'
         : 'Đã chuyển vào thùng rác!';
-      alert(successMessage);
+      toast.success(successMessage);
     } catch (err) {
       console.error('Delete error:', err);
-      alert('Lỗi khi xóa email!');
+      toast.error('Lỗi khi xóa email!');
     }
   };
 
@@ -664,7 +689,7 @@ export default function Inbox() {
       }
     } catch (err) {
       console.error('Delete error:', err);
-      alert('Lỗi khi xóa email!');
+      toast.error('Lỗi khi xóa email!');
     }
   };
 
@@ -684,7 +709,7 @@ export default function Inbox() {
       // Không unselect - giữ nguyên selection
     } catch (err) {
       console.error('Bulk mark read error:', err);
-      alert('Lỗi khi cập nhật trạng thái!');
+      toast.error('Lỗi khi cập nhật trạng thái!');
     }
   };
 
@@ -755,7 +780,7 @@ export default function Inbox() {
     }
     
     try {
-      await api.post('/mail/send', {
+      await api.post('/gmail/send', {
         to: composeTo,
         cc: composeCc,
         bcc: composeBcc,
@@ -778,10 +803,10 @@ export default function Inbox() {
       
       // Refresh sent mailbox
       queryClient.invalidateQueries({ queryKey: ['emails', 'sent'] });
-      alert('Gửi email thành công!');
+      toast.success('Gửi email thành công!');
     } catch (err) {
       console.error('Send email error:', err);
-      alert('Lỗi khi gửi email!');
+      toast.error('Lỗi khi gửi email!');
     }
   };
 
@@ -1084,7 +1109,7 @@ export default function Inbox() {
                 key={mailbox.id}
                 role="button"
                 tabIndex={0}
-                aria-label={`${mailbox.name} mailbox${mailbox.unread > 0 ? `, ${mailbox.unread} unread` : ''}`}
+                aria-label={`${mailbox.name} mailbox`}
                 aria-current={selectedMailbox === mailbox.id ? 'page' : undefined}
                 className={`flex items-center p-2 mb-1 rounded cursor-pointer hover:bg-gray-200 focus:outline-none ${
                   selectedMailbox === mailbox.id ? 'bg-blue-100 text-blue-600' : ''
@@ -1097,12 +1122,17 @@ export default function Inbox() {
                   }
                 }}
               >
-                <span className="mr-2">{mailboxIcons[mailbox.id as keyof typeof mailboxIcons]}</span>
+                <span className="mr-2">
+                  {
+                    mailboxIcons[
+                      (mailbox.name as string).toLowerCase() as keyof typeof mailboxIcons
+                    ] || mailboxIcons.default
+                  }
+                </span>
                 <span>{mailbox.name}</span>
-                {/* Chỉ hiển thị unread count cho inbox */}
-                {mailbox.id === 'inbox' && mailbox.unread > 0 && (
+                {mailbox.messagesUnread > 0 && (
                   <span className="ml-auto bg-blue-500 text-white text-xs rounded-full px-2">
-                    {mailbox.unread}
+                    {mailbox.messagesUnread}
                   </span>
                 )}
               </li>

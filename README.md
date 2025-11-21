@@ -1,16 +1,15 @@
-# React Authentication & Email Dashboard
+# React Email Client with Gmail Integration
 
-This is a full-stack application that implements secure authentication using email + password and Google Sign-In (OAuth). After authentication, users land on a mock email dashboard.
+This is a full-stack application that implements a real-time email client with Gmail integration. It uses Google OAuth2 to access a user’s Gmail account via the Gmail REST API.
 
 ## Features
 
-- **Email & Password Authentication:** Secure user registration and login.
-- **Google Sign-In:** Seamless authentication using Google accounts.
-- **Token-Based Security:** Uses JWT access and refresh tokens for secure API communication.
+- **Real-time Gmail Integration:** Connects to your Gmail account and displays your emails in a 3-column dashboard.
+- **Secure Google OAuth2 Authentication:** Uses a secure, server-side OAuth2 flow to access your Gmail data.
+- **Full Email Functionality:** Read, compose, reply, delete, star, and manage your emails.
+- **Token-Based Security:** Uses JWT access and refresh tokens for secure API communication with the backend proxy.
 - **Automatic Token Refresh:** Automatically refreshes expired access tokens without interrupting the user.
-- **Protected Routes:** Ensures that only authenticated users can access protected content.
-- **3-Column Email Dashboard:** A responsive, interactive mockup of an email client.
-- **Mock API:** A mock API for all email-related endpoints.
+- **3-Column Email Dashboard:** A responsive, interactive email client UI.
 
 ## Tech Stack
 
@@ -23,8 +22,7 @@ This is a full-stack application that implements secure authentication using ema
 - **TanStack Query:** A powerful data-fetching and state management library.
 - **Axios:** A promise-based HTTP client.
 - **Tailwind CSS:** A utility-first CSS framework.
-- **React Hook Form & Zod:** For flexible and validated forms.
-- **@react-oauth/google:** For Google Sign-In integration.
+- **react-hot-toast:** For toast notifications.
 
 ### Backend
 
@@ -33,6 +31,7 @@ This is a full-stack application that implements secure authentication using ema
 - **MongoDB & Mongoose:** A NoSQL database and an elegant object modeling tool.
 - **Passport.js:** A simple, unobtrusive authentication middleware for Node.js.
 - **JWT & Google OAuth2 Strategies:** Passport.js strategies for token-based and Google authentication.
+- **googleapis:** The official Google API client library for Node.js.
 - **bcrypt:** A library for hashing passwords.
 
 ## Getting Started
@@ -42,12 +41,23 @@ This is a full-stack application that implements secure authentication using ema
 - **Node.js:** v18 or higher.
 - **npm or Yarn:** For managing project dependencies.
 - **MongoDB:** A running MongoDB instance (local or cloud).
+- **Google Cloud Platform Account:** To get OAuth2 credentials.
+
+### How to get Google OAuth2 Credentials
+
+1.  Go to the [Google Cloud Console](https://console.cloud.google.com/).
+2.  Create a new project.
+3.  Go to **APIs & Services > Credentials**.
+4.  Click **Create Credentials > OAuth client ID**.
+5.  Select **Web application** as the application type.
+6.  Add `http://localhost:3000/auth/google/callback` to the **Authorized redirect URIs**.
+7.  Click **Create**. You will get a client ID and client secret.
 
 ### Backend Setup
 
 1.  **Navigate to the backend directory:**
     ```sh
-    cd Source/backend
+    cd backend
     ```
 2.  **Install dependencies:**
     ```sh
@@ -75,7 +85,7 @@ This is a full-stack application that implements secure authentication using ema
 
 1.  **Navigate to the frontend directory:**
     ```sh
-    cd Source/frontend
+    cd frontend
     ```
 2.  **Install dependencies:**
     ```sh
@@ -84,7 +94,6 @@ This is a full-stack application that implements secure authentication using ema
 3.  **Create a `.env` file** in the `frontend` directory and add the following environment variables:
     ```
     VITE_API_URL=http://localhost:3000
-    VITE_GOOGLE_CLIENT_ID=your_google_client_id
     ```
 4.  **Start the development server:**
     ```sh
@@ -94,21 +103,14 @@ This is a full-stack application that implements secure authentication using ema
 
 ## Token Storage Choices
 
--   **Access Token:** Stored in-memory for the session. This is a secure approach as it prevents XSS attacks from accessing the token.
--   **Refresh Token:** Stored in `localStorage`. This allows the user to stay logged in across browser sessions. While this approach is vulnerable to XSS attacks, it is a common trade-off for better user experience. To mitigate this risk, the refresh token is invalidated on logout and has a shorter expiration time. A more secure approach would be to store the refresh token in an `HttpOnly` cookie, but that would require a more complex setup.
-
-## Third-Party Services
-
--   **Google OAuth 2.0:** For Google Sign-In functionality.
--   **Vercel:** For hosting the frontend application.
--   **Render:** For hosting the backend application.
-
-## Github
-
-- **Guthub:** [https://github.com/QuangNo1Pro/web_nc_GA03_React_Authentication.git](https://github.com/QuangNo1Pro/web_nc_GA03_React_Authentication.git)
+-   **Application Access Token:** Stored in-memory for the session. This is a secure approach as it prevents XSS attacks from accessing the token.
+-   **Application Refresh Token:** Stored in `localStorage`. This allows the user to stay logged in across browser sessions.
+-   **Google Refresh Token:** Stored securely in the backend database. It is encrypted before being saved. The frontend never has access to this token.
 
 ## Deployment
 The application is deployed and publicly accessible at the following URLs:
 
--   **Frontend (Vercel):** [https://web-nc-ga-03-react-authentication.vercel.app/](https://web-nc-ga-03-react-authentication.vercel.app/)
--   **Backend (Render):** [https://web-nc-ga03-react-authentication.onrender.com](https://web-nc-ga03-react-authentication.onrender.com)
+-   **Frontend (Vercel):** [https://web-nc-ga-03-react-email-client.vercel.app/](https://web-nc-ga-03-react-email-client.vercel.app/)
+-   **Backend (Render):** [https://web-nc-ga03-react-email-client.onrender.com](https://web-nc-ga03-react-email-client.onrender.com)
+
+**Note:** The deployed backend has the necessary environment variables for the Google credentials.

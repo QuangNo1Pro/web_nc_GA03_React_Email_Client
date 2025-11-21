@@ -18,7 +18,7 @@ export class UsersService {
   }
 
   async findById(id: string) {
-    return this.userModel.findById(id).exec();
+    return this.userModel.findById(id).select('+googleAccessToken +googleRefreshToken').exec();
   }
 
   async findByGoogleId(googleId: string) {
@@ -49,14 +49,32 @@ export class UsersService {
     }
   }
 
-  async createWithGoogle(email: string, googleId: string) {
+  async createWithGoogle(
+    email: string,
+    googleId: string,
+    googleAccessToken: string,
+    googleRefreshToken: string,
+  ) {
     const existing = await this.findByEmail(email);
     if (existing) {
       throw new ConflictException('Email này đã được đăng ký');
     }
 
     try {
-      const created = new this.userModel({ email, googleId });
+      const saltRounds = parseInt(
+        this.configService.get<string>('BCRYPT_SALT_ROUNDS') || '10',
+        10,
+      );
+      const hashedRefreshToken = await bcrypt.hash(
+        googleRefreshToken,
+        saltRounds,
+      );
+      const created = new this.userModel({
+        email,
+        googleId,
+        googleAccessToken,
+        googleRefreshToken: hashedRefreshToken,
+      });
       return created.save();
     } catch (err: any) {
       if (err.code === 11000) {
@@ -68,6 +86,56 @@ export class UsersService {
 
   async setCurrentRefreshToken(userId: string, refreshToken: string | null) {
     return this.userModel.findByIdAndUpdate(userId, { refreshToken }).exec();
+  }
+
+  async setGoogleTokens(
+    userId: string,
+    googleAccessToken: string,
+    googleRefreshToken: string,
+  ) {
+    const saltRounds = parseInt(
+      this.configService.get<string>('BCRYPT_SALT_ROUNDS') || '10',
+      10,
+    );
+    const hashedRefreshToken = await bcrypt.hash(googleRefreshToken, saltRounds);
+    return this.userModel
+      .findByIdAndUpdate(userId, {
+        googleAccessToken,
+        googleRefreshToken: hashedRefreshToken,
+      })
+      .exec();
+  }
+
+  async updateGoogleTokens(
+    googleId: string,
+    googleAccessToken: string,
+    googleRefreshToken?: string,
+  ) {
+    const update: {
+      googleAccessToken: string;
+      googleRefreshToken?: string;
+    } = { googleAccessToken };
+
+    if (googleRefreshToken) {
+      const saltRounds = parseInt(
+        this.configService.get<string>('BCRYPT_SALT_ROUNDS') || '10',
+        10,
+      );
+      update.googleRefreshToken = await bcrypt.hash(
+        googleRefreshToken,
+        saltRounds,
+      );
+    }
+
+    return this.userModel
+      .findOneAndUpdate({ googleId }, { $set: update })
+      .exec();
+  }
+
+  async updateGoogleAccessToken(googleId: string, googleAccessToken: string) {
+    return this.userModel
+      .findOneAndUpdate({ googleId }, { googleAccessToken })
+      .exec();
   }
 
   async getUserIfRefreshTokenMatches(refreshToken: string, userId: string) {

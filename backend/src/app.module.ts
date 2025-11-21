@@ -3,7 +3,7 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
 import { MongooseModule } from '@nestjs/mongoose';
 import { UsersModule } from './users/users.module';
 import { AuthModule } from './auth/auth.module';
-import { MailModule } from './mail/mail.module';
+import { GmailModule } from './gmail/gmail.module';
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
@@ -26,7 +26,7 @@ import { MailModule } from './mail/mail.module';
     }),
     UsersModule,
     AuthModule,
-    MailModule,
+    GmailModule,
   ],
   controllers: [],
 })

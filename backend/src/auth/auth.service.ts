@@ -3,12 +3,14 @@ import { Injectable, ForbiddenException } from '@nestjs/common';
 import { UsersService } from '../users/users.service';
 import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcrypt';
+import { GmailService } from '../gmail/gmail.service';
 
 @Injectable()
 export class AuthService {
   constructor(
     private usersService: UsersService,
     private jwtService: JwtService,
+    private gmailService: GmailService,
   ) {}
 
   async validateUser(email: string, pass: string): Promise<any> {
@@ -29,7 +31,23 @@ export class AuthService {
       dbUser = await this.usersService.createWithGoogle(
         user.email,
         user.id,
+        user.accessToken,
+        user.refreshToken,
       );
+    } else {
+      if (user.refreshToken) {
+        await this.usersService.updateGoogleTokens(
+          user.id,
+          user.accessToken,
+          user.refreshToken,
+        );
+      } else {
+        await this.usersService.updateGoogleAccessToken(
+          user.id,
+          user.accessToken,
+        );
+      }
+      dbUser = await this.usersService.findByGoogleId(user.id);
     }
 
     return this.login(dbUser);
@@ -54,6 +72,7 @@ export class AuthService {
   }
 
   async logout(userId: string) {
+    await this.gmailService.revokeToken(userId);
     return this.usersService.setCurrentRefreshToken(userId, null);
   }
 
