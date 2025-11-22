@@ -9,12 +9,13 @@ import {
   HttpCode,
   HttpStatus,
   Res,
+  Req,
 } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
 import { AuthService } from './auth.service';
 import { CreateUserDto } from '../users/dto/create-user.dto';
 import { UsersService } from '../users/users.service';
-import { Response } from 'express';
+import { Response, Request as ExpressRequest } from 'express';
 
 @Controller('auth')
 export class AuthController {
@@ -37,15 +38,36 @@ export class AuthController {
 
   @UseGuards(AuthGuard('local'))
   @Post('login')
-  async login(@Request() req: any) {
-    return this.authService.login(req.user);
+  async login(@Request() req: any, @Res({ passthrough: true }) res: Response) {
+    const tokens = await this.authService.login(req.user);
+    res.cookie('access_token', tokens.access_token, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV !== 'development',
+      sameSite: 'strict',
+      path: '/',
+    });
+    res.cookie('refresh_token', tokens.refresh_token, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV !== 'development',
+      sameSite: 'strict',
+      path: '/',
+    });
+    return {
+      status: 'success',
+      message: 'Đăng nhập thành công',
+    };
   }
 
   @UseGuards(AuthGuard('jwt'))
   @Post('logout')
   @HttpCode(HttpStatus.OK)
-  async logout(@Request() req: any) {
+  async logout(
+    @Request() req: any,
+    @Res({ passthrough: true }) res: Response,
+  ) {
     await this.authService.logout(req.user.userId);
+    res.clearCookie('access_token', { path: '/' });
+    res.clearCookie('refresh_token', { path: '/' });
     return {
       status: 'success',
       message: 'Đăng xuất thành công',
@@ -55,8 +77,22 @@ export class AuthController {
   @UseGuards(AuthGuard('jwt-refresh'))
   @Post('refresh')
   @HttpCode(HttpStatus.OK)
-  async refresh(@Request() req: any) {
-    return this.authService.refreshToken(req.user.userId, req.user.refreshToken);
+  async refresh(
+    @Request() req: any,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    // The user object is attached by the jwt-refresh.strategy
+    const tokens = await this.authService.refreshToken(req.user);
+    res.cookie('access_token', tokens.access_token, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV !== 'development',
+      sameSite: 'strict',
+      path: '/',
+    });
+    return {
+      status: 'success',
+      message: 'Token refreshed successfully',
+    };
   }
 
   @UseGuards(AuthGuard('google'))
@@ -65,11 +101,24 @@ export class AuthController {
 
   @UseGuards(AuthGuard('google'))
   @Get('google/callback')
-  async googleAuthRedirect(@Request() req: any, @Res() res: Response) {
+  async googleAuthRedirect(
+    @Request() req: any,
+    @Res() res: Response,
+  ) {
     const tokens = await this.authService.googleLogin(req.user);
-    res.redirect(
-      `${process.env.FRONTEND_URL}/login?access_token=${tokens.access_token}&refresh_token=${tokens.refresh_token}`,
-    );
+    res.cookie('access_token', tokens.access_token, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV !== 'development', // use secure cookies in production
+      sameSite: 'strict',
+      path: '/',
+    });
+    res.cookie('refresh_token', tokens.refresh_token, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV !== 'development',
+      sameSite: 'strict',
+      path: '/',
+    });
+    res.redirect(`${process.env.FRONTEND_URL}/inbox`);
   }
 
   @UseGuards(AuthGuard('jwt'))

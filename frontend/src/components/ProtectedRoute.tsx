@@ -1,15 +1,19 @@
 import React from 'react';
 import { Navigate } from 'react-router-dom';
-import { useAuth } from '../auth/auth';
+import { useAuth } from '../auth/AuthContext';
 
 interface ProtectedRouteProps {
   children: React.ReactNode;
 }
 
 const ProtectedRoute: React.FC<ProtectedRouteProps> = ({ children }) => {
-  const { tokens } = useAuth();
+  const { user, loading } = useAuth();
 
-  if (!tokens.access_token) {
+  if (loading) {
+    return <div>Loading...</div>; // Or a proper spinner/loader component
+  }
+
+  if (!user) {
     return <Navigate to="/login" replace />;
   }
 

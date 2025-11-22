@@ -1,60 +1,44 @@
-import { createContext, useContext, useState, useEffect } from 'react';
-import {
-  setAccessToken,
-  getAccessToken,
-  setRefreshToken,
-  getRefreshToken,
-  removeTokens,
-} from '../services/token';
+import { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import { api } from '../services/api';
 
-const AuthContext = createContext(null);
+const AuthContext = createContext<any>(null);
 
-export const AuthProvider = ({ children }) => {
+export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   const [user, setUser] = useState(null);
-  const [tokens, setTokens] = useState({
-    access_token: getAccessToken(),
-    refresh_token: getRefreshToken(),
-  });
   const [loading, setLoading] = useState(true);
 
-  const fetchUserProfile = async () => {
+  const fetchUserProfile = useCallback(async () => {
     try {
       const response = await api.get('/auth/profile');
       setUser(response.data);
     } catch (error) {
-      console.error('Failed to fetch user profile:', error);
-      logout();
-    }
-  };
-
-  useEffect(() => {
-    const initializeAuth = async () => {
-      if (tokens.access_token) {
-        await fetchUserProfile();
-      }
+      console.error('Not authenticated:', error);
+      setUser(null);
+    } finally {
       setLoading(false);
-    };
-    initializeAuth();
+    }
   }, []);
 
-  const login = async (newTokens) => {
-    setAccessToken(newTokens.access_token);
-    setRefreshToken(newTokens.refresh_token);
-    setTokens({
-      access_token: newTokens.access_token,
-      refresh_token: newTokens.refresh_token,
-    });
+  useEffect(() => {
+    fetchUserProfile();
+  }, [fetchUserProfile]);
+
+  const login = async () => {
+    // After backend sets cookies, fetch profile to update state
     await fetchUserProfile();
   };
 
-  const logout = () => {
-    setUser(null);
-    removeTokens();
-    setTokens({ access_token: null, refresh_token: null });
+  const logout = async () => {
+    try {
+      await api.post('/auth/logout');
+    } catch (error) {
+      console.error('Logout failed', error);
+    } finally {
+      setUser(null);
+    }
   };
 
-  const value = { user, tokens, login, logout, setUser, loading };
+  const value = { user, login, logout, setUser, loading };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 };

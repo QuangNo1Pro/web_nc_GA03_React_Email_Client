@@ -1,12 +1,11 @@
-import React, { useEffect } from 'react';
+import React from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import * as z from 'zod';
 import { useMutation } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../services/api';
-import { useAuth } from '../auth/auth';
-import { GoogleLogin } from '@react-oauth/google';
+import { useAuth } from '../auth/AuthContext';
 
 const schema = z.object({
   email: z.string().email({ message: 'Email không hợp lệ' }),
@@ -27,36 +26,12 @@ export default function Login() {
   const navigate = useNavigate();
   const { login } = useAuth();
   const [serverMessage, setServerMessage] = React.useState<string | null>(null);
-  const [debugInfo, setDebugInfo] = React.useState<string | null>(null);
-
-  useEffect(() => {
-    const urlParams = new URLSearchParams(window.location.search);
-    const accessToken = urlParams.get('access_token');
-    const refreshToken = urlParams.get('refresh_token');
-
-    if (accessToken && refreshToken) {
-      const info = {
-        currentUrlBeforeProcessing: window.location.href,
-        accessToken: accessToken,
-        refreshToken: refreshToken,
-      };
-      setDebugInfo(JSON.stringify(info, null, 2));
-
-      login({ access_token: accessToken, refresh_token: refreshToken });
-      navigate('/inbox', { replace: true });
-      // Clear tokens from URL
-      urlParams.delete('access_token');
-      urlParams.delete('refresh_token');
-      const newUrl = `${window.location.pathname}`;
-      window.history.replaceState({}, document.title, newUrl);
-    }
-  }, [login, navigate]);
 
   const mutation = useMutation<any, any, FormValues, unknown>({
     mutationFn: (data: FormValues) =>
       api.post('/auth/login', data).then((res) => res.data),
     onSuccess: (data) => {
-      login(data);
+      login();
       setServerMessage('Đăng nhập thành công');
       setTimeout(() => navigate('/inbox'), 800);
     },
@@ -169,12 +144,6 @@ export default function Login() {
               </button>
             </div>
           </div>
-          {debugInfo && (
-            <div className="mt-6 p-4 bg-gray-100 rounded-md text-sm break-all">
-              <h3 className="font-semibold mb-2">Debug Information:</h3>
-              <pre>{debugInfo}</pre>
-            </div>
-          )}
         </div>
       </div>
       <div className="hidden lg:flex flex-1 items-center justify-center bg-indigo-700">

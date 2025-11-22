@@ -76,14 +76,7 @@ export class AuthService {
     return this.usersService.setCurrentRefreshToken(userId, null);
   }
 
-  async refreshToken(userId: string, refreshToken: string) {
-    const user = await this.usersService.getUserIfRefreshTokenMatches(
-      refreshToken,
-      userId,
-    );
-    if (!user) {
-      throw new ForbiddenException('Access Denied');
-    }
+  async refreshToken(user: any) {
     const payload = { email: user.email, sub: user._id };
     const accessToken = this.jwtService.sign(payload);
     return { access_token: accessToken };

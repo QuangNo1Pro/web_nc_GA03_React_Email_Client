@@ -7,17 +7,17 @@ import Inbox from './pages/Inbox';
 import { useQueryClient } from '@tanstack/react-query';
 
 import ProtectedRoute from './components/ProtectedRoute';
-import { useAuth } from './auth/auth';
+import { useAuth } from './auth/AuthContext';
 
 export default function App() {
-  const { tokens, logout, loading } = useAuth();
+  const { user, logout, loading } = useAuth();
   const queryClient = useQueryClient();
   const handleLogout = () => {
     logout();
     queryClient.invalidateQueries();
   };
 
-  const isAuthenticated = !!tokens.access_token;
+  const isAuthenticated = !!user;
 
   if (loading) {
     return (

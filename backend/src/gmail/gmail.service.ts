@@ -66,8 +66,75 @@ export class GmailService {
     try {
       const gmail = await this.getGmailClient(userId);
       const res = await gmail.users.labels.list({ userId: 'me' });
-      return res.data.labels;
+      
+      const labels = (res.data.labels || []).filter(label => label.id);
+      const labelsWithUnreadCount = await Promise.all(
+        labels.map(async (label) => {
+          try {
+            // Get all message IDs for this label (paginated)
+            let allMessageIds: string[] = [];
+            let pageToken: string | undefined = undefined;
+            
+            do {
+              const messagesRes: any = await gmail.users.messages.list({
+                userId: 'me',
+                labelIds: [label.id!],
+                pageToken,
+                maxResults: 100,
+              });
+              
+              allMessageIds.push(
+                ...(messagesRes.data?.messages?.map((m: any) => m.id || '') || [])
+              );
+              pageToken = messagesRes.data?.nextPageToken;
+            } while (pageToken && allMessageIds.length < 1000); // Limit to 1000 for performance
+
+            if (allMessageIds.length === 0) {
+              return {
+                id: label.id!,
+                name: label.name || 'Unknown',
+                messagesTotal: label.messagesTotal || 0,
+                messagesUnread: 0,
+              };
+            }
+
+            // Get details of all messages to check if they have UNREAD label
+            const messageDetails = await Promise.all(
+              allMessageIds.map(msgId =>
+                gmail.users.messages.get({
+                  userId: 'me',
+                  id: msgId,
+                  format: 'minimal',
+                })
+              )
+            );
+
+            // Count how many have UNREAD label
+            const unreadCount = messageDetails.filter(msg =>
+              msg.data.labelIds?.includes('UNREAD')
+            ).length;
+
+            return {
+              id: label.id!,
+              name: label.name || 'Unknown',
+              messagesTotal: label.messagesTotal || 0,
+              messagesUnread: unreadCount,
+            };
+          } catch (error) {
+            console.error(`Failed to get unread count for label ${label.id}:`, error);
+            return {
+              id: label.id!,
+              name: label.name || 'Unknown',
+              messagesTotal: label.messagesTotal || 0,
+              messagesUnread: 0,
+            };
+          }
+        })
+      );
+      
+      return labelsWithUnreadCount;
     } catch (error) {
+      console.error('Failed to get mailboxes:', error);
       throw new InternalServerErrorException('Failed to get mailboxes');
     }
   }
@@ -208,16 +275,7 @@ export class GmailService {
     return res.data;
   }
 
-  async deleteEmails(userId: string, messageIds: string[]) {
-    const gmail = await this.getGmailClient(userId);
-    const res = await gmail.users.messages.batchDelete({
-      userId: 'me',
-      requestBody: {
-        ids: messageIds,
-      },
-    });
-    return res.data;
-  }
+
 
   async sendEmail(
     userId: string,
@@ -226,13 +284,22 @@ export class GmailService {
     body: string,
     cc?: string,
     bcc?: string,
+    attachments?: { filename: string; mimeType: string; base64Content: string }[],
   ) {
     const gmail = await this.getGmailClient(userId);
-    const raw = this.createMessage(to, subject, body, cc, bcc);
+    const rawStandardBase64 = this.createMessage(to, subject, body, cc, bcc, attachments);
+    
+    // Convert standard base64 to base64url for Gmail API
+    // base64url: replace + with -, / with _, and remove padding =
+    let base64UrlEncodedEmail = rawStandardBase64
+      .replace(/\+/g, '-')
+      .replace(/\//g, '_')
+      .replace(/=/g, '');
+
     const res = await gmail.users.messages.send({
       userId: 'me',
       requestBody: {
-        raw,
+        raw: base64UrlEncodedEmail,
       },
     });
     return res.data;
@@ -244,8 +311,11 @@ export class GmailService {
     body: string,
     cc?: string,
     bcc?: string,
+    attachments?: { filename: string; mimeType: string; base64Content: string }[],
   ) {
     const emailLines = [];
+    
+    // Add recipients and subject
     emailLines.push(`To: ${to}`);
     if (cc) {
       emailLines.push(`Cc: ${cc}`);
@@ -254,9 +324,41 @@ export class GmailService {
       emailLines.push(`Bcc: ${bcc}`);
     }
     emailLines.push(`Subject: ${subject}`);
-    emailLines.push('Content-Type: text/html; charset=utf-8');
-    emailLines.push('');
-    emailLines.push(body);
+
+    if (attachments && attachments.length > 0) {
+      const boundary = 'frontier'; // A unique string to separate parts
+
+      emailLines.push('MIME-Version: 1.0');
+      emailLines.push(`Content-Type: multipart/mixed; boundary="${boundary}"`);
+      emailLines.push('');
+      emailLines.push(`--${boundary}`);
+      emailLines.push('Content-Type: text/html; charset=utf-8');
+      emailLines.push('Content-Transfer-Encoding: 8bit');
+      emailLines.push('');
+      emailLines.push(body); // Email body
+      emailLines.push('');
+
+      attachments.forEach((attachment) => {
+        emailLines.push(`--${boundary}`);
+        emailLines.push(`Content-Type: ${attachment.mimeType}; name="${attachment.filename}"`);
+        emailLines.push('Content-Transfer-Encoding: base64');
+        emailLines.push(`Content-Disposition: attachment; filename="${attachment.filename}"`);
+        emailLines.push('');
+        
+        // Split base64 content into 76-character lines (RFC 2045)
+        const base64Lines = attachment.base64Content.match(/.{1,76}/g) || [];
+        emailLines.push(...base64Lines);
+        emailLines.push('');
+      });
+
+      emailLines.push(`--${boundary}--`); // Closing boundary
+    } else {
+      // Simple text/html message if no attachments
+      emailLines.push('Content-Type: text/html; charset=utf-8');
+      emailLines.push('Content-Transfer-Encoding: 8bit');
+      emailLines.push('');
+      emailLines.push(body);
+    }
 
     return Buffer.from(emailLines.join('\r\n')).toString('base64');
   }
@@ -277,5 +379,19 @@ export class GmailService {
       await oauth2Client.revokeToken(user.googleRefreshToken);
     } catch (error) {
     }
+  }
+
+  async getAttachment(
+    userId: string,
+    messageId: string,
+    attachmentId: string,
+  ) {
+    const gmail = await this.getGmailClient(userId);
+    const res = await gmail.users.messages.attachments.get({
+      userId: 'me',
+      messageId: messageId,
+      id: attachmentId,
+    });
+    return res.data;
   }
 }

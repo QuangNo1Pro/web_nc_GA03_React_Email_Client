@@ -1,69 +1,70 @@
-# React Email Client with Gmail Integration
+# Ứng dụng Email Client bằng React tích hợp Gmail
 
-This is a full-stack application that implements a real-time email client with Gmail integration. It uses Google OAuth2 to access a user’s Gmail account via the Gmail REST API.
+Đây là một ứng dụng full-stack triển khai một email client thời gian thực với tính năng tích hợp Gmail. Ứng dụng sử dụng Google OAuth2 để truy cập tài khoản Gmail của người dùng thông qua Gmail REST API.
 
-## Features
+## Tính năng
 
-- **Real-time Gmail Integration:** Connects to your Gmail account and displays your emails in a 3-column dashboard.
-- **Secure Google OAuth2 Authentication:** Uses a secure, server-side OAuth2 flow to access your Gmail data.
-- **Full Email Functionality:** Read, compose, reply, delete, star, and manage your emails.
-- **Token-Based Security:** Uses JWT access and refresh tokens for secure API communication with the backend proxy.
-- **Automatic Token Refresh:** Automatically refreshes expired access tokens without interrupting the user.
-- **3-Column Email Dashboard:** A responsive, interactive email client UI.
+-   **Tích hợp Gmail thời gian thực:** Kết nối với tài khoản Gmail của bạn và hiển thị email trong giao diện bảng điều khiển 3 cột.
+-   **Xác thực Google OAuth2 bảo mật:** Sử dụng luồng OAuth2 phía máy chủ an toàn để truy cập dữ liệu Gmail của bạn.
+-   **Chức năng email đầy đủ:** Đọc, soạn, trả lời, xóa, gắn dấu sao và quản lý email của bạn.
+-   **Bảo mật dựa trên Token:** Sử dụng access và refresh token JWT để giao tiếp API an toàn với proxy backend.
+-   **Tự động làm mới Token:** Tự động làm mới access token đã hết hạn mà không làm gián đoạn người dùng.
+-   **Giao diện bảng điều khiển Email 3 cột:** Giao diện người dùng email client tương thích, tương tác.
 
-## Tech Stack
+## Công nghệ sử dụng
 
 ### Frontend
 
-- **React:** A JavaScript library for building user interfaces.
-- **TypeScript:** A typed superset of JavaScript.
-- **Vite:** A fast build tool and development server.
-- **React Router v6:** A declarative routing library for React.
-- **TanStack Query:** A powerful data-fetching and state management library.
-- **Axios:** A promise-based HTTP client.
-- **Tailwind CSS:** A utility-first CSS framework.
-- **react-hot-toast:** For toast notifications.
+-   **React:** Thư viện JavaScript để xây dựng giao diện người dùng.
+-   **TypeScript:** Một siêu tập hợp của JavaScript có kiểu dữ liệu.
+-   **Vite:** Công cụ xây dựng và máy chủ phát triển nhanh.
+-   **React Router v6:** Thư viện định tuyến khai báo cho React.
+-   **TanStack Query:** Thư viện mạnh mẽ để tìm nạp và quản lý trạng thái dữ liệu.
+-   **Axios:** Một HTTP client dựa trên promise.
+-   **Tailwind CSS:** Một framework CSS tập trung vào tiện ích.
+-   **react-hot-toast:** Để hiển thị thông báo toast.
 
 ### Backend
 
-- **NestJS:** A progressive Node.js framework for building efficient and scalable server-side applications.
-- **TypeScript:** A typed superset of JavaScript.
-- **MongoDB & Mongoose:** A NoSQL database and an elegant object modeling tool.
-- **Passport.js:** A simple, unobtrusive authentication middleware for Node.js.
-- **JWT & Google OAuth2 Strategies:** Passport.js strategies for token-based and Google authentication.
-- **googleapis:** The official Google API client library for Node.js.
-- **bcrypt:** A library for hashing passwords.
+-   **NestJS:** Một framework Node.js tiến bộ để xây dựng các ứng dụng phía máy chủ hiệu quả và có khả năng mở rộng.
+-   **TypeScript:** Một siêu tập hợp của JavaScript có kiểu dữ liệu.
+-   **MongoDB & Mongoose:** Một cơ sở dữ liệu NoSQL và một công cụ tạo mô hình đối tượng thanh lịch.
+-   **Passport.js:** Một middleware xác thực đơn giản, không phô trương cho Node.js.
+-   **JWT & Google OAuth2 Strategies:** Các chiến lược Passport.js để xác thực dựa trên token và Google.
+-   **googleapis:** Thư viện client API chính thức của Google cho Node.js.
+-   **bcrypt:** Thư viện để mã hóa mật khẩu.
 
-## Getting Started
+## Bắt đầu
 
-### Prerequisites
+### Điều kiện tiên quyết
 
-- **Node.js:** v18 or higher.
-- **npm or Yarn:** For managing project dependencies.
-- **MongoDB:** A running MongoDB instance (local or cloud).
-- **Google Cloud Platform Account:** To get OAuth2 credentials.
+-   **Node.js:** v18 trở lên.
+-   **npm hoặc Yarn:** Để quản lý các phần phụ thuộc của dự án.
+-   **MongoDB:** Một phiên bản MongoDB đang chạy (cục bộ hoặc trên đám mây).
+-   **Tài khoản Google Cloud Platform:** Để lấy thông tin xác thực OAuth2.
 
-### How to get Google OAuth2 Credentials
+### Cách lấy thông tin xác thực Google OAuth2
 
-1.  Go to the [Google Cloud Console](https://console.cloud.google.com/).
-2.  Create a new project.
-3.  Go to **APIs & Services > Credentials**.
-4.  Click **Create Credentials > OAuth client ID**.
-5.  Select **Web application** as the application type.
-6.  Add `http://localhost:3000/auth/google/callback` to the **Authorized redirect URIs**.
-7.  Click **Create**. You will get a client ID and client secret.
+1.  Truy cập [Google Cloud Console](https://console.cloud.google.com/).
+2.  Tạo một dự án mới.
+3.  Vào **APIs & Services > Credentials**.
+4.  Nhấp vào **Create Credentials > OAuth client ID**.
+5.  Chọn **Web application** làm loại ứng dụng.
+6.  Thêm `http://localhost:3000/auth/google/callback` vào **Authorized redirect URIs**.
+7.  Nhấp vào **Create**. Bạn sẽ nhận được client ID và client secret.
 
-### Backend Setup
+### Cài đặt Backend
 
-1.  **Navigate to the backend directory:**
+1.  **Truy cập thư mục backend:**
     ```sh
     cd backend
     ```
-2.  **Install dependencies:**
+2.  **Cài đặt các phần phụ thuộc:**
     ```sh
     npm install
+    npm install cookie-parser
     ```
-3.  **Create a `.env` file** in the `backend` directory and add the following environment variables:
+3.  **Tạo tệp `.env`** trong thư mục `backend` và thêm các biến môi trường sau:
     ```
     MONGODB_URI=your_mongodb_connection_string
     PORT=3000
@@ -75,42 +76,63 @@ This is a full-stack application that implements a real-time email client with G
     GOOGLE_CLIENT_SECRET=your_google_client_secret
     GOOGLE_CALLBACK_URL=http://localhost:3000/auth/google/callback
     ```
-4.  **Start the development server:**
+4.  **Khởi động máy chủ phát triển:**
     ```sh
     npm run start:dev
     ```
-    The backend server will start on `http://localhost:3000`.
+    Máy chủ backend sẽ chạy trên `http://localhost:3000`.
 
-### Frontend Setup
+### Cài đặt Frontend
 
-1.  **Navigate to the frontend directory:**
+1.  **Truy cập thư mục frontend:**
     ```sh
     cd frontend
     ```
-2.  **Install dependencies:**
+2.  **Cài đặt các phần phụ thuộc:**
     ```sh
     npm install
     ```
-3.  **Create a `.env` file** in the `frontend` directory and add the following environment variables:
+3.  **Tạo tệp `.env`** trong thư mục `frontend` và thêm các biến môi trường sau:
     ```
     VITE_API_URL=http://localhost:3000
     ```
-4.  **Start the development server:**
+4.  **Khởi động máy chủ phát triển:**
     ```sh
     npm run dev
     ```
-    The frontend application will be available at `http://localhost:5173`.
+    Ứng dụng frontend sẽ khả dụng tại `http://localhost:5173`.
 
-## Token Storage Choices
+## Cải tiến bảo mật & Lưu trữ Token
 
--   **Application Access Token:** Stored in-memory for the session. This is a secure approach as it prevents XSS attacks from accessing the token.
--   **Application Refresh Token:** Stored in `localStorage`. This allows the user to stay logged in across browser sessions.
--   **Google Refresh Token:** Stored securely in the backend database. It is encrypted before being saved. The frontend never has access to this token.
+Dự án này đã được tái cấu trúc để sử dụng mô hình xác thực dựa trên cookie mạnh mẽ, bảo mật.
 
-## Deployment
-The application is deployed and publicly accessible at the following URLs:
+-   **`HttpOnly` Cookies:** `access_token` và `refresh_token` của ứng dụng được lưu trữ trong các `HttpOnly` cookie an toàn. Đây là một biện pháp bảo mật quan trọng giúp ngăn chặn các token này bị truy cập bởi JavaScript phía client, giảm thiểu rủi ro đánh cắp token thông qua các cuộc tấn công Cross-Site Scripting (XSS). Trình duyệt sẽ tự động và an toàn quản lý các token này.
+-   **Mã hóa Refresh Token phía máy chủ:** Refresh token của ứng dụng được mã hóa bằng `bcrypt` trước khi lưu trữ trong cơ sở dữ liệu. Điều này cung cấp một lớp bảo mật bổ sung, đảm bảo rằng ngay cả khi cơ sở dữ liệu bị xâm phạm, các refresh token sẽ không thể sử dụng ngay lập tức.
+-   **Bảo vệ đồng thời (Concurrency Guard):** API client trên frontend hiện bao gồm một bảo vệ đồng thời. Cơ chế này đảm bảo rằng nếu nhiều lệnh gọi API thất bại đồng thời do access token hết hạn, chỉ có một yêu cầu làm mới được gửi đến backend. Tất cả các yêu cầu thất bại khác sẽ được xếp hàng và thử lại với token mới ngay khi có, ngăn ngừa tình trạng tranh chấp và các yêu cầu mạng không cần thiết.
+-   **Lưu trữ Token Google an toàn:** `googleRefreshToken` có thời gian tồn tại dài, được lấy từ Google, được lưu trữ an toàn trong cơ sở dữ liệu backend (dưới dạng văn bản thuần, vì nó được yêu cầu để gọi API tới Google) và không bao giờ bị lộ ra frontend.
+
+## Kiểm tra chức năng làm mới Token
+
+Để kiểm tra cơ chế tự động làm mới token có hoạt động chính xác hay không, bạn có thể tạm thời rút ngắn thời gian hết hạn của `access_token`.
+
+1.  Mở tệp backend: `backend/src/auth/auth.service.ts`.
+2.  Đi đến phương thức `login`.
+3.  Tìm dòng sau:
+    ```typescript
+    this.jwtService.sign(payload),
+    ```
+4.  Sửa đổi nó để thêm thời gian hết hạn ngắn:
+    ```typescript
+    this.jwtService.sign(payload, { expiresIn: '15s' }),
+    ```
+5.  Khởi động lại máy chủ backend. Bây giờ, khi bạn đăng nhập, `access_token` sẽ hết hạn trong 15 giây. Sau 15 giây, hãy thử thực hiện một hành động cần xác thực (ví dụ: làm mới danh sách email). Yêu cầu sẽ thành công mà không bị đăng xuất, vì API client đã tự động sử dụng `refresh_token` để lấy `access_token` mới.
+
+**Quan trọng:** Đừng quên xóa bỏ thay đổi `{ expiresIn: '15s' }` sau khi bạn đã kiểm tra xong.
+
+## Triển khai
+Ứng dụng được triển khai và có thể truy cập công khai tại các URL sau:
 
 -   **Frontend (Vercel):** [https://web-nc-ga-03-react-email-client.vercel.app/](https://web-nc-ga-03-react-email-client.vercel.app/)
 -   **Backend (Render):** [https://web-nc-ga03-react-email-client.onrender.com](https://web-nc-ga03-react-email-client.onrender.com)
 
-**Note:** The deployed backend has the necessary environment variables for the Google credentials.
+**Lưu ý:** Backend đã triển khai có các biến môi trường cần thiết cho thông tin xác thực Google.

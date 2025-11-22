@@ -14,19 +14,15 @@ import {
   FiRefreshCw,
   FiMoreVertical,
   FiFolder,
-  FiArchive,
-  FiTrash2,
 } from 'react-icons/fi';
 import { FaRegStar, FaStar } from 'react-icons/fa';
 import { LuMail, LuMailOpen, LuMails } from 'react-icons/lu';
 import { TbMailFilled, TbMailOpenedFilled } from 'react-icons/tb';
-import { RiDeleteBin6Line, RiDeleteBin6Fill } from 'react-icons/ri';
 import { IoIosArrowDown } from 'react-icons/io';
 import { 
   ArrowReply20Regular, 
   ArrowReplyAll20Regular, 
   ArrowForward20Regular,
-  Archive20Regular,
   FolderArrowRight20Regular
 } from '@fluentui/react-icons';
 
@@ -35,8 +31,6 @@ const mailboxIcons: { [key: string]: JSX.Element } = {
   starred: <FaRegStar />,
   sent: <FiSend />,
   drafts: <FiFileText />,
-  archive: <FiArchive />,
-  trash: <FiTrash2 />,
   spam: <FiFolder />,
   default: <FiFolder />,
 };
@@ -79,6 +73,50 @@ const parseEmail = (email: any) => {
     read,
     preview,
   };
+};
+
+// Helper to convert base64 to a Blob
+const b64toBlob = (b64Data: string, contentType = '', sliceSize = 512) => {
+  const byteCharacters = atob(b64Data);
+  const byteArrays = [];
+
+  for (let offset = 0; offset < byteCharacters.length; offset += sliceSize) {
+    const slice = byteCharacters.slice(offset, offset + sliceSize);
+
+    const byteNumbers = new Array(slice.length);
+    for (let i = 0; i < slice.length; i++) {
+      byteNumbers[i] = slice.charCodeAt(i);
+    }
+
+    const byteArray = new Uint8Array(byteNumbers);
+    byteArrays.push(byteArray);
+  }
+
+  const blob = new Blob(byteArrays, { type: contentType });
+  return blob;
+};
+
+// Helper to recursively parse attachments from email payload
+const parseAttachments = (parts: any[]): any[] => {
+  let attachments: any[] = [];
+  if (!parts) {
+    return attachments;
+  }
+
+  parts.forEach(part => {
+    if (part.parts) {
+      attachments = attachments.concat(parseAttachments(part.parts));
+    }
+    if (part.filename && part.body?.attachmentId) {
+      attachments.push({
+        attachmentId: part.body.attachmentId,
+        filename: part.filename,
+        mimeType: part.mimeType,
+        size: part.body.size,
+      });
+    }
+  });
+  return attachments;
 };
 
 // Helper function to get consistent color for avatar based on sender name
@@ -135,7 +173,7 @@ const EmailRow = ({ index, style, data }: any) => {
       aria-label={`Email from ${email.sender}: ${email.subject}`}
       className={`flex items-start p-3 cursor-pointer hover:bg-gray-100 border-b ${
         selectedEmail === email.id ? 'bg-blue-50' : ''
-      } ${isFocused ? 'ring-2 ring-blue-400' : ''} ${!email.read && selectedMailbox !== 'trash' ? 'border-l-4 border-l-blue-500' : 'border-l-4 border-l-transparent'}`}
+      } ${isFocused ? 'ring-2 ring-blue-400' : ''} ${!email.read ? 'border-l-4 border-l-blue-500' : 'border-l-4 border-l-transparent'}`}
     >
       {/* Avatar container với checkbox */}
       <div className="relative mr-3 flex-shrink-0">
@@ -150,6 +188,7 @@ const EmailRow = ({ index, style, data }: any) => {
                 handleToggleCheckbox(email.id);
               }}
               onClick={(e) => e.stopPropagation()}
+              aria-label={selectedEmails.has(email.id) ? `Bỏ chọn email từ ${email.sender} với chủ đề ${email.subject}` : `Chọn email từ ${email.sender} với chủ đề ${email.subject}`}
             />
           </div>
         ) : (
@@ -194,17 +233,7 @@ const EmailRow = ({ index, style, data }: any) => {
                 <LuMailOpen className="text-blue-500 hover:text-blue-600" size={16} />
               )}
             </button>
-            {/* Icon delete */}
-            <button
-              className="opacity-60 hover:opacity-100 hover:text-red-600 transition-all p-0.5"
-              title="Xóa"
-              onClick={e => {
-                e.stopPropagation();
-                handleDeleteEmail(email.id);
-              }}
-            >
-              <RiDeleteBin6Line className="text-gray-500 hover:text-red-600" size={16} />
-            </button>
+
           </span>
         </div>
         {/* Hàng thứ hai: subject + timestamp */}
@@ -252,13 +281,12 @@ export default function Inbox() {
   const [showMoveToMenu, setShowMoveToMenu] = useState(false);
   const [showReadFilterMenu, setShowReadFilterMenu] = useState(false);
   const [readFilter, setReadFilter] = useState<'all' | 'read' | 'unread'>('all');
+  const [downloadingAttachments, setDownloadingAttachments] = useState<Set<string>>(new Set());
   const emailListRef = useRef<HTMLDivElement>(null);
   const [listHeight, setListHeight] = useState(500);
   const [isMailHoveredDetail, setIsMailHoveredDetail] = useState(false);
   const [isStarHoveredDetail, setIsStarHoveredDetail] = useState(false);
-  const [isDeleteHoveredNavbar, setIsDeleteHoveredNavbar] = useState(false);
   const [isRefreshHovered, setIsRefreshHovered] = useState(false);
-  const [isArchiveHovered, setIsArchiveHovered] = useState(false);
   const [isReplyHovered, setIsReplyHovered] = useState(false);
   const [isReplyAllHovered, setIsReplyAllHovered] = useState(false);
   const [isForwardHovered, setIsForwardHovered] = useState(false);
@@ -300,20 +328,61 @@ export default function Inbox() {
   const email = selectedEmail 
     ? (() => {
         const listEmail = emails?.find((e: any) => e.id === selectedEmail);
-        if (!listEmail && !emailDetail) return null;
+        if (!emailDetail) return listEmail || null;
         
         // Ưu tiên read/starred từ list (đã được update optimistically)
         return {
           ...emailDetail,
-          ...listEmail,
+          ...(listEmail || {}),
           // Giữ lại body/attachments/cc từ detail (list không có)
-          body: emailDetail?.body || listEmail?.body || '',
-          attachments: emailDetail?.attachments || listEmail?.attachments || [],
-          cc: emailDetail?.cc || listEmail?.cc || '',
-          bcc: emailDetail?.bcc || listEmail?.bcc || '',
+          body: emailDetail?.body || '',
+          attachments: parseAttachments(emailDetail?.payload?.parts),
+          // Extract more details from headers if needed
+          from: emailDetail?.headers.From,
+          to: emailDetail?.headers.To,
+          cc: emailDetail?.headers.Cc,
+          bcc: emailDetail?.headers.Bcc,
+          subject: emailDetail?.headers.Subject,
+          received: emailDetail?.headers.Date,
         };
       })()
     : null;
+
+  const handleDownloadAttachment = async (messageId: string, attachment: any) => {
+    if (downloadingAttachments.has(attachment.attachmentId)) return;
+
+    setDownloadingAttachments(prev => new Set(prev).add(attachment.attachmentId));
+    const toastId = toast.loading(`Đang tải xuống ${attachment.filename}...`);
+
+    try {
+      const { data } = await api.get(
+        `/gmail/attachments/${messageId}/${attachment.attachmentId}`,
+      );
+
+      // The Gmail API returns base64url encoded data, which needs to be converted to standard base64
+      const b64 = data.data.replace(/-/g, '+').replace(/_/g, '/');
+      const blob = b64toBlob(b64, attachment.mimeType);
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.setAttribute('download', attachment.filename);
+      document.body.appendChild(link);
+      link.click();
+      link.parentNode?.removeChild(link);
+      window.URL.revokeObjectURL(url);
+      
+      toast.success('Tải xuống thành công!', { id: toastId });
+    } catch (err) {
+      console.error('Download error:', err);
+      toast.error('Lỗi khi tải xuống tệp!', { id: toastId });
+    } finally {
+      setDownloadingAttachments(prev => {
+        const newSet = new Set(prev);
+        newSet.delete(attachment.attachmentId);
+        return newSet;
+      });
+    }
+  };
 
   const handleMailboxSelect = (mailboxId: string) => {
     setSelectedMailbox(mailboxId);
@@ -323,6 +392,8 @@ export default function Inbox() {
     setSelectedEmails(new Set()); // reset selected emails when switching mailbox
     setShowCheckboxes(false); // reset checkbox mode when switching mailbox
     setFocusedEmailIndex(0); // reset focus to first email
+    // Refresh mailboxes to update unread counts
+    queryClient.invalidateQueries({ queryKey: ['mailboxes'] });
   };
 
   // Keyboard navigation
@@ -414,6 +485,13 @@ export default function Inbox() {
     return () => window.removeEventListener('resize', updateHeight);
   }, []);
 
+  // Debug: Log mailboxes data
+  useEffect(() => {
+    if (mailboxes) {
+      console.log('Mailboxes data:', mailboxes);
+    }
+  }, [mailboxes]);
+
   // Khi fetch emails, cập nhật trạng thái starred từ dữ liệu backend
   useEffect(() => {
     if (emails) {
@@ -437,7 +515,7 @@ export default function Inbox() {
     
     // Optimistic update: cập nhật TẤT CẢ cache liên quan
     queryClient.setQueryData(['emails', selectedMailbox], (oldData: any) => {
-      if (!oldData) return oldData;
+      if (!Array.isArray(oldData)) return oldData;
       return oldData.map((e: any) => 
         e.id === emailId ? { ...e, starred: newStarred } : e
       );
@@ -445,7 +523,7 @@ export default function Inbox() {
     
     // Update cache của starred mailbox luôn
     queryClient.setQueryData(['emails', 'starred'], (oldData: any) => {
-      if (!oldData) return oldData;
+      if (!Array.isArray(oldData)) return oldData;
       return oldData.map((e: any) => 
         e.id === emailId ? { ...e, starred: newStarred } : e
       );
@@ -469,7 +547,7 @@ export default function Inbox() {
         [emailId]: !newStarred,
       }));
       queryClient.setQueryData(['emails', selectedMailbox], (oldData: any) => {
-        if (!oldData) return oldData;
+        if (!Array.isArray(oldData)) return oldData;
         return oldData.map((e: any) => 
           e.id === emailId ? { ...e, starred: !newStarred } : e
         );
@@ -487,7 +565,7 @@ export default function Inbox() {
     
     // Optimistic update: cập nhật TẤT CẢ cache liên quan
     queryClient.setQueryData(['emails', selectedMailbox], (oldData: any) => {
-      if (!oldData) return oldData;
+      if (!Array.isArray(oldData)) return oldData;
       return oldData.map((e: any) => 
         e.id === emailId ? { ...e, read: newRead } : e
       );
@@ -496,7 +574,7 @@ export default function Inbox() {
     // Update cache của starred mailbox nếu email có starred
     if (emailObj.starred) {
       queryClient.setQueryData(['emails', 'starred'], (oldData: any) => {
-        if (!oldData) return oldData;
+        if (!Array.isArray(oldData)) return oldData;
         return oldData.map((e: any) => 
           e.id === emailId ? { ...e, read: newRead } : e
         );
@@ -518,7 +596,7 @@ export default function Inbox() {
     } catch (err) {
       // Nếu lỗi, revert lại cache
       queryClient.setQueryData(['emails', selectedMailbox], (oldData: any) => {
-        if (!oldData) return oldData;
+        if (!Array.isArray(oldData)) return oldData;
         return oldData.map((e: any) => 
           e.id === emailId ? { ...e, read: !newRead } : e
         );
@@ -614,91 +692,14 @@ export default function Inbox() {
     document.addEventListener('mouseup', handleMouseUp);
   };
 
-  // Hàm xử lý bulk delete
-  const handleBulkDelete = async () => {
-    const emailsToDelete = selectedEmails.size > 0 
-      ? Array.from(selectedEmails) 
-      : selectedEmail ? [selectedEmail] : [];
-    
-    if (emailsToDelete.length === 0) return;
-    
-    const isInTrash = selectedMailbox === 'trash';
-    const confirmMessage = isInTrash 
-      ? `Xóa vĩnh viễn ${emailsToDelete.length} email? (Không thể khôi phục)`
-      : `Chuyển ${emailsToDelete.length} email vào thùng rác?`;
-    
-        if (!confirm(confirmMessage)) return;
-        
-        try {
-          await api.delete('/gmail/emails', {
-            data: { ids: emailsToDelete }
-          });
-          
-          // Invalidate cache để refresh danh sách      queryClient.invalidateQueries({ queryKey: ['emails', selectedMailbox] });
-      queryClient.invalidateQueries({ queryKey: ['mailboxes'] });
-      
-      // Nếu chuyển vào trash, invalidate trash queries
-      if (!isInTrash) {
-        queryClient.invalidateQueries({ queryKey: ['emails', 'trash'] });
-      }
-      
-      // Clear selection
-      setSelectedEmails(new Set());
-      setShowCheckboxes(false);
-      if (selectedEmail && emailsToDelete.includes(selectedEmail)) {
-        setSelectedEmail(null);
-      }
-      
-      const successMessage = isInTrash 
-        ? 'Đã xóa vĩnh viễn!'
-        : 'Đã chuyển vào thùng rác!';
-      toast.success(successMessage);
-    } catch (err) {
-      console.error('Delete error:', err);
-      toast.error('Lỗi khi xóa email!');
-    }
-  };
 
-  // Hàm xử lý delete single email từ Column 2
-  const handleDeleteEmail = async (emailId: string) => {
-    const isInTrash = selectedMailbox === 'trash';
-    const confirmMessage = isInTrash 
-      ? 'Xóa vĩnh viễn email này? (Không thể khôi phục)'
-      : 'Chuyển email vào thùng rác?';
-    
-    if (!confirm(confirmMessage)) return;
-    
-    try {
-      await api.delete('/mail/emails', { 
-        data: { ids: [emailId] } 
-      });
-      
-      // Invalidate cache để refresh danh sách
-      queryClient.invalidateQueries({ queryKey: ['emails', selectedMailbox] });
-      queryClient.invalidateQueries({ queryKey: ['mailboxes'] });
-      queryClient.invalidateQueries({ queryKey: ['emails', 'starred'] });
-      
-      // Nếu chuyển vào trash, invalidate trash queries
-      if (!isInTrash) {
-        queryClient.invalidateQueries({ queryKey: ['emails', 'trash'] });
-      }
-      
-      // Nếu đang xem email này ở Column 3, đóng nó
-      if (selectedEmail === emailId) {
-        setSelectedEmail(null);
-      }
-    } catch (err) {
-      console.error('Delete error:', err);
-      toast.error('Lỗi khi xóa email!');
-    }
-  };
 
   // Hàm xử lý bulk mark read/unread
   const handleBulkMarkRead = async (read: boolean) => {
     if (selectedEmails.size === 0) return;
     
     try {
-      await api.patch('/mail/emails/bulk-read', {
+      await api.patch('/gmail/emails/bulk-read', {
         ids: Array.from(selectedEmails),
         read
       });
@@ -772,22 +773,47 @@ export default function Inbox() {
     setShowComposeModal(true);
   };
 
+  // Helper function to read a File object as a base64 string
+  const readFileAsBase64 = (file: File): Promise<string> => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        // Remove the "data:mime/type;base64," prefix
+        const base64String = (reader.result as string).split(',')[1];
+        resolve(base64String);
+      };
+      reader.onerror = (error) => reject(error);
+      reader.readAsDataURL(file);
+    });
+  };
+
   // Hàm gửi email
   const handleSendEmail = async () => {
-    if (!composeTo || !composeSubject || !composeBody) {
-      alert('Vui lòng điền đầy đủ thông tin!');
+    if (!composeTo || !composeSubject || (!composeBody && composeAttachments.length === 0)) {
+      alert('Vui lòng điền đầy đủ thông tin hoặc thêm tệp đính kèm!');
       return;
     }
     
     try {
+      // Process attachments into base64
+      const processedAttachments = await Promise.all(
+        composeAttachments.map(async (file) => {
+          const base64Content = await readFileAsBase64(file);
+          return {
+            filename: file.name,
+            mimeType: file.type,
+            base64Content: base64Content,
+          };
+        }),
+      );
+
       await api.post('/gmail/send', {
         to: composeTo,
         cc: composeCc,
         bcc: composeBcc,
         subject: composeSubject,
         body: composeBody,
-        // Send attachments as objects with name and size (bytes)
-        attachments: composeAttachments.map(f => ({ name: f.name, size: f.size }))
+        attachments: processedAttachments,
       });
       
       // Reset form và đóng modal
@@ -809,6 +835,7 @@ export default function Inbox() {
       toast.error('Lỗi khi gửi email!');
     }
   };
+
 
   return (
     <div className="inbox-container flex flex-col h-[calc(100vh-65px)] bg-white">
@@ -838,141 +865,11 @@ export default function Inbox() {
             <FiRefreshCw size={16} className={isRefreshHovered ? "text-blue-700" : "text-blue-600"} />
           </button>
           
-          {/* Delete */}
-          <button
-            className="p-2 hover:bg-gray-200 rounded disabled:opacity-50 disabled:cursor-not-allowed"
-            onClick={handleBulkDelete}
-            disabled={selectedEmails.size === 0 && !selectedEmail}
-            title="Xóa"
-            onMouseEnter={() => setIsDeleteHoveredNavbar(true)}
-            onMouseLeave={() => setIsDeleteHoveredNavbar(false)}
-          >
-            {isDeleteHoveredNavbar ? (
-              <RiDeleteBin6Fill className="text-red-700" size={18} />
-            ) : (
-              <RiDeleteBin6Line className="text-red-600" size={18} />
-            )}
-          </button>
+
           
-          {/* Archive */}
-          <button
-            className="p-2 hover:bg-gray-200 rounded disabled:opacity-50 disabled:cursor-not-allowed"
-            onClick={async () => {
-              if (selectedEmails.size === 0 && !selectedEmail) return;
-              
-              const emailsToArchive = selectedEmails.size > 0 
-                ? Array.from(selectedEmails) 
-                : selectedEmail ? [selectedEmail] : [];
-              
-              if (emailsToArchive.length === 0) return;
-              if (!confirm(`Lưu trữ ${emailsToArchive.length} email?`)) return;
-              
-              try {
-                // Archive từng email
-                for (const emailId of emailsToArchive) {
-                  await api.patch(`/mail/emails/${emailId}/archive`);
-                }
-                
-                // Invalidate queries để refresh
-                queryClient.invalidateQueries({ queryKey: ['mailboxes'] });
-                queryClient.invalidateQueries({ queryKey: ['emails', selectedMailbox] });
-                queryClient.invalidateQueries({ queryKey: ['emails', 'starred'] });
-                queryClient.invalidateQueries({ queryKey: ['emails', 'archive'] });
-                
-                // Clear selection
-                setSelectedEmails(new Set());
-                setShowCheckboxes(false);
-                if (selectedEmail && emailsToArchive.includes(selectedEmail)) {
-                  setSelectedEmail(null);
-                }
-                
-                alert('Đã lưu trữ email thành công!');
-              } catch (error) {
-                console.error('Archive error:', error);
-                alert('Lỗi khi lưu trữ email!');
-              }
-            }}
-            disabled={selectedEmails.size === 0 && !selectedEmail}
-            title="Lưu trữ"
-            onMouseEnter={() => setIsArchiveHovered(true)}
-            onMouseLeave={() => setIsArchiveHovered(false)}
-          >
-            <Archive20Regular className={isArchiveHovered ? "text-green-700" : "text-green-600"} />
-          </button>
+
           
-          {/* Move to folder */}
-          <div className="relative">
-            <button
-              className="p-2 hover:bg-gray-200 rounded disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1"
-              onClick={() => setShowMoveToMenu(!showMoveToMenu)}
-              disabled={selectedEmails.size === 0 && !selectedEmail}
-              title="Chuyển đến một thư mục"
-            >
-              <FolderArrowRight20Regular className="text-blue-600" />
-              <span className="text-xs text-blue-600">▼</span>
-            </button>
-            
-            {showMoveToMenu && (selectedEmails.size > 0 || selectedEmail) && (
-              <>
-                <div 
-                  className="fixed inset-0 z-10" 
-                  onClick={() => setShowMoveToMenu(false)}
-                ></div>
-                <div className="absolute left-0 top-full mt-1 w-56 bg-white border border-gray-200 rounded shadow-lg z-20 max-h-96 overflow-y-auto">
-                  {mailboxes?.filter((mb: any) => {
-                    // Chỉ cho phép chuyển đến: archive, trash, hoặc custom folders
-                    const allowedMailboxes = ['archive', 'trash', 'custom1', 'custom2'];
-                    return allowedMailboxes.includes(mb.id) && mb.id !== selectedMailbox;
-                  }).map((mailbox: any) => (
-                    <button
-                      key={mailbox.id}
-                      onClick={async () => {
-                        setShowMoveToMenu(false);
-                        
-                        const emailsToMove = selectedEmails.size > 0 
-                          ? Array.from(selectedEmails) 
-                          : selectedEmail ? [selectedEmail] : [];
-                        
-                        if (emailsToMove.length === 0) return;
-                        if (!confirm(`Di chuyển ${emailsToMove.length} email đến ${mailbox.name}?`)) return;
-                        
-                        try {
-                          // Di chuyển từng email
-                          for (const emailId of emailsToMove) {
-                            await api.patch(`/mail/emails/${emailId}/move`, { 
-                              targetMailbox: mailbox.id 
-                            });
-                          }
-                          
-                          // Invalidate queries
-                          queryClient.invalidateQueries({ queryKey: ['mailboxes'] });
-                          queryClient.invalidateQueries({ queryKey: ['emails', selectedMailbox] });
-                          queryClient.invalidateQueries({ queryKey: ['emails', mailbox.id] });
-                          queryClient.invalidateQueries({ queryKey: ['emails', 'starred'] });
-                          
-                          // Clear selection
-                          setSelectedEmails(new Set());
-                          setShowCheckboxes(false);
-                          if (selectedEmail && emailsToMove.includes(selectedEmail)) {
-                            setSelectedEmail(null);
-                          }
-                          
-                          alert(`Đã di chuyển ${emailsToMove.length} email đến ${mailbox.name}!`);
-                        } catch (error) {
-                          console.error('Move error:', error);
-                          alert('Lỗi khi di chuyển email!');
-                        }
-                      }}
-                      className="w-full text-left px-4 py-2 hover:bg-gray-100 flex items-center gap-3 border-b last:border-b-0"
-                    >
-                      <span>{mailboxIcons[mailbox.id as keyof typeof mailboxIcons]}</span>
-                      <span>{mailbox.name}</span>
-                    </button>
-                  ))}
-                </div>
-              </>
-            )}
-          </div>
+
           
           <div className="h-6 w-px bg-gray-300 mx-1" />
           
@@ -1023,7 +920,7 @@ export default function Inbox() {
                   // Đánh dấu tất cả email là đã đọc
                   for (const email of emails) {
                     if (!email.read) {
-                      await api.patch(`/mail/emails/${email.id}/read`, { read: true });
+                      await api.patch(`/gmail/emails/${email.id}/read`, { read: true });
                     }
                   }
                   
@@ -1093,7 +990,6 @@ export default function Inbox() {
         >
         <div className="flex justify-between items-center p-4 flex-shrink-0">
           <h2 className="text-lg font-semibold">Mailboxes</h2>
-          <FiEdit className="cursor-pointer" />
         </div>
         <div className="flex-1 overflow-y-auto px-4 pb-4">
         {mailboxesLoading ? (
@@ -1104,14 +1000,23 @@ export default function Inbox() {
           <div>Error loading mailboxes</div>
         ) : (
           <ul>
-            {mailboxes?.map((mailbox: any) => (
+            {mailboxes
+              ?.filter((mailbox: any) => {
+                const allowedSystemLabels = ['INBOX', 'STARRED', 'SENT', 'DRAFT', 'SPAM', 'IMPORTANT', 'UNREAD'];
+                // Giữ lại các label hệ thống được phép hoặc label không phải là hệ thống (custom labels)
+                return (
+                  allowedSystemLabels.includes(mailbox.id) ||
+                  (!mailbox.id.startsWith('CATEGORY_') && !mailbox.id.startsWith('SYSTEM_')) // Lọc các category labels của Gmail
+                );
+              })
+              .map((mailbox: any) => (
               <li
                 key={mailbox.id}
                 role="button"
                 tabIndex={0}
                 aria-label={`${mailbox.name} mailbox`}
                 aria-current={selectedMailbox === mailbox.id ? 'page' : undefined}
-                className={`flex items-center p-2 mb-1 rounded cursor-pointer hover:bg-gray-200 focus:outline-none ${
+                className={`flex items-center justify-between p-2 mb-1 rounded cursor-pointer hover:bg-gray-200 focus:outline-none ${
                   selectedMailbox === mailbox.id ? 'bg-blue-100 text-blue-600' : ''
                 }`}
                 onClick={() => handleMailboxSelect(mailbox.id)}
@@ -1129,10 +1034,10 @@ export default function Inbox() {
                     ] || mailboxIcons.default
                   }
                 </span>
-                <span>{mailbox.name}</span>
-                {mailbox.messagesUnread > 0 && (
-                  <span className="ml-auto bg-blue-500 text-white text-xs rounded-full px-2">
-                    {mailbox.messagesUnread}
+                <span className="flex-1 min-w-0 truncate">{mailbox.name}</span>
+                {(mailbox.messagesUnread || 0) > 0 && (
+                  <span className="mailbox-unread-badge">
+                    {mailbox.messagesUnread || 0}
                   </span>
                 )}
               </li>
@@ -1176,29 +1081,29 @@ export default function Inbox() {
                     onClick={() => setShowMailboxMenu(false)}
                   ></div>
                   <div className="absolute left-0 top-full mt-2 w-56 bg-white border border-gray-200 rounded-lg shadow-lg z-20 max-h-96 overflow-y-auto">
-                    {mailboxes?.map((mailbox: any) => (
+                    {mailboxes
+                      ?.filter((mailbox: any) => {
+                        const allowedSystemLabels = ['INBOX', 'STARRED', 'SENT', 'DRAFT', 'SPAM'];
+                        return (
+                          allowedSystemLabels.includes(mailbox.id) ||
+                          !mailbox.id.startsWith('CATEGORY_')
+                        );
+                      })
+                      .map((mailbox: any) => (
                       <button
                         key={mailbox.id}
                         onClick={() => {
                           handleMailboxSelect(mailbox.id);
                           setShowMailboxMenu(false);
                         }}
-                        className={`w-full text-left px-4 py-3 hover:bg-gray-100 flex items-center gap-3 border-b last:border-b-0 ${
+                        className={`w-full text-left px-4 py-3 hover:bg-gray-100 flex items-center justify-between border-b last:border-b-0 ${
                           selectedMailbox === mailbox.id ? 'bg-blue-50 text-blue-600' : ''
                         }`}
                       >
-                        <span className="text-lg">{mailboxIcons[mailbox.id as keyof typeof mailboxIcons]}</span>
-                        <span className="flex-1">{mailbox.name}</span>
-                        {mailbox.id === 'starred' && (mailbox as any).count > 0 && (
-                          <span className="bg-blue-500 text-white text-xs rounded-full px-2 py-0.5">
-                            {(mailbox as any).count}
-                          </span>
-                        )}
-                        {mailbox.id !== 'starred' && mailbox.unread > 0 && (
-                          <span className="bg-blue-500 text-white text-xs rounded-full px-2 py-0.5">
-                            {mailbox.unread}
-                          </span>
-                        )}
+                        <div className="flex items-center gap-3 min-w-0">
+                          <span className="text-lg">{mailboxIcons[mailbox.id as keyof typeof mailboxIcons]}</span>
+                          <span className="flex-1 min-w-0 truncate">{mailbox.name}</span>
+                        </div>
                       </button>
                     ))}
                   </div>
@@ -1221,6 +1126,7 @@ export default function Inbox() {
                 }).length)}
                 onChange={handleToggleSelectAll}
                 title={selectedEmails.size > 0 ? `${selectedEmails.size} selected` : 'Chọn tất cả'}
+                aria-label={selectedEmails.size > 0 ? `Bỏ chọn tất cả ${selectedEmails.size} email đã chọn` : 'Chọn tất cả email'}
               />
               <FiMoreVertical className="cursor-pointer text-gray-600" />
             </div>
@@ -1236,6 +1142,7 @@ export default function Inbox() {
                 return true;
               }).length)}
               onChange={handleToggleSelectAll}
+              aria-label={selectedEmails.size > 0 ? `Bỏ chọn tất cả ${selectedEmails.size} email đã chọn` : 'Chọn tất cả email'}
             />
             <span className="text-sm text-gray-600">
               {selectedEmails.size > 0 ? `${selectedEmails.size} selected` : 'Chọn tất cả'}
@@ -1285,7 +1192,6 @@ export default function Inbox() {
                 handleEmailSelect,
                 handleToggleRead,
                 handleToggleStar,
-                handleDeleteEmail,
               }}
             >
               {EmailRow}
@@ -1456,49 +1362,7 @@ export default function Inbox() {
                           
                           {/* Dropdown Menu */}
                           <div className="absolute right-0 mt-1 w-48 bg-white border border-gray-200 rounded shadow-lg z-20">
-                            <button
-                              onClick={async () => {
-                                setShowMoreMenu(false);
-                                
-                                const isInTrash = selectedMailbox === 'trash';
-                                const confirmMessage = isInTrash 
-                                  ? 'Xóa vĩnh viễn email này? (Không thể khôi phục)'
-                                  : 'Chuyển email vào thùng rác?';
-                                
-                                if (confirm(confirmMessage)) {
-                                  try {
-                                    await api.delete('/mail/emails', { 
-                                      data: { ids: [email.id] } 
-                                    });
-                                    
-                                    // Invalidate tất cả queries để refresh
-                                    queryClient.invalidateQueries({ queryKey: ['mailboxes'] });
-                                    queryClient.invalidateQueries({ queryKey: ['emails', selectedMailbox] });
-                                    queryClient.invalidateQueries({ queryKey: ['emails', 'starred'] });
-                                    
-                                    // Nếu chuyển vào trash, invalidate trash queries
-                                    if (!isInTrash) {
-                                      queryClient.invalidateQueries({ queryKey: ['emails', 'trash'] });
-                                    }
-                                    
-                                    // Đóng email detail
-                                    setSelectedEmail(null);
-                                    
-                                    const successMessage = isInTrash 
-                                      ? 'Đã xóa vĩnh viễn!'
-                                      : 'Đã chuyển vào thùng rác!';
-                                    alert(successMessage);
-                                  } catch (error) {
-                                    console.error('Delete error:', error);
-                                    alert('Lỗi khi xóa email!');
-                                  }
-                                }
-                              }}
-                              className="w-full text-left px-4 py-2 hover:bg-gray-100 flex items-center gap-2 text-red-600"
-                            >
-                              <RiDeleteBin6Line className="w-4 h-4" />
-                              {selectedMailbox === 'trash' ? 'Xóa vĩnh viễn' : 'Xóa'}
-                            </button>
+
                           </div>
                         </>
                       )}
@@ -1526,18 +1390,19 @@ export default function Inbox() {
                           key={index}
                           className="flex items-center justify-between p-3 bg-gray-50 border rounded hover:bg-gray-100"
                         >
-                          <div className="flex items-center gap-2">
-                            <FiFileText className="text-gray-500" size={20} />
-                            <div>
-                              <div className="text-sm font-medium">{attachment.name}</div>
-                              <div className="text-xs text-gray-500">{attachment.size}</div>
+                          <div className="flex items-center gap-2 min-w-0">
+                            <FiFileText className="text-gray-500 flex-shrink-0" size={20} />
+                            <div className="truncate">
+                              <div className="text-sm font-medium truncate">{attachment.filename}</div>
+                              <div className="text-xs text-gray-500">{Math.round(attachment.size / 1024)} KB</div>
                             </div>
                           </div>
                           <button
-                            className="px-3 py-1 text-sm bg-blue-500 text-white rounded hover:bg-blue-600"
-                            onClick={() => alert(`Download ${attachment.name}`)}
+                            className="px-3 py-1 text-sm bg-blue-500 text-white rounded hover:bg-blue-600 disabled:bg-gray-400"
+                            onClick={() => handleDownloadAttachment(email.id, attachment)}
+                            disabled={downloadingAttachments.has(attachment.attachmentId)}
                           >
-                            Tải xuống
+                            {downloadingAttachments.has(attachment.attachmentId) ? 'Đang tải...' : 'Tải xuống'}
                           </button>
                         </div>
                       ))}
@@ -1649,6 +1514,7 @@ export default function Inbox() {
                       setComposeAttachments(Array.from(e.target.files));
                     }
                   }}
+                  aria-label="Tệp đính kèm"
                 />
                 {composeAttachments.length > 0 && (
                   <div className="mt-2 space-y-1">

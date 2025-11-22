@@ -68,10 +68,7 @@ export class GmailController {
     );
   }
 
-  @Delete('emails')
-  deleteEmails(@Request() req: ExpressRequest, @Body('ids') messageIds: string[]) {
-    return this.gmailService.deleteEmails((req.user as any).userId, messageIds);
-  }
+
 
   @Post('send')
   sendEmail(
@@ -81,6 +78,7 @@ export class GmailController {
     @Body('body') body: string,
     @Body('cc') cc?: string,
     @Body('bcc') bcc?: string,
+    @Body('attachments') attachments?: { filename: string; mimeType: string; base64Content: string }[],
   ) {
     return this.gmailService.sendEmail(
       (req.user as any).userId,
@@ -89,6 +87,20 @@ export class GmailController {
       body,
       cc,
       bcc,
+      attachments,
+    );
+  }
+
+  @Get('attachments/:messageId/:attachmentId')
+  getAttachment(
+    @Request() req: ExpressRequest,
+    @Param('messageId') messageId: string,
+    @Param('attachmentId') attachmentId: string,
+  ) {
+    return this.gmailService.getAttachment(
+      (req.user as any).userId,
+      messageId,
+      attachmentId,
     );
   }
 }
