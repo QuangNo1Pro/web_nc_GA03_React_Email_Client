@@ -68,9 +68,29 @@ export class GmailController {
     );
   }
 
+  @Delete('emails/:messageId')
+  deleteEmail(
+    @Request() req: ExpressRequest,
+    @Param('messageId') messageId: string,
+  ) {
+    return this.gmailService.deleteEmail(
+      (req.user as any).userId,
+      messageId,
+    );
+  }
+
+  @Patch('emails/:messageId/archive')
+  archiveEmail(
+    @Request() req: ExpressRequest,
+    @Param('messageId') messageId: string,
+  ) {
+    return this.gmailService.archiveEmail(
+      (req.user as any).userId,
+      messageId,
+    );
+  }
 
 
-  @Post('send')
   sendEmail(
     @Request() req: ExpressRequest,
     @Body('to') to: string,

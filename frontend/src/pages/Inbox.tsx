@@ -14,6 +14,7 @@ import {
   FiRefreshCw,
   FiMoreVertical,
   FiFolder,
+  FiTrash2,
 } from 'react-icons/fi';
 import { FaRegStar, FaStar } from 'react-icons/fa';
 import { LuMail, LuMailOpen, LuMails } from 'react-icons/lu';
@@ -32,6 +33,7 @@ const mailboxIcons: { [key: string]: JSX.Element } = {
   sent: <FiSend />,
   drafts: <FiFileText />,
   spam: <FiFolder />,
+  all_mail: <FolderArrowRight20Regular />, // Add icon for archive
   default: <FiFolder />,
 };
 
@@ -293,6 +295,8 @@ export default function Inbox() {
   const [isReplyHoveredDetail, setIsReplyHoveredDetail] = useState(false);
   const [isReplyAllHoveredDetail, setIsReplyAllHoveredDetail] = useState(false);
   const [isForwardHoveredDetail, setIsForwardHoveredDetail] = useState(false);
+  const [isArchiveHoveredDetail, setIsArchiveHoveredDetail] = useState(false);
+  const [isDeleteHoveredDetail, setIsDeleteHoveredDetail] = useState(false);
 
   const {
     data: mailboxes,
@@ -311,7 +315,13 @@ export default function Inbox() {
     queryKey: ['emails', selectedMailbox],
     queryFn: () => fetchEmails(selectedMailbox),
     enabled: !!selectedMailbox,
-    select: (data) => data.messages.map(parseEmail),
+    select: (data) => {
+      const parsedEmails = data.messages.map(parseEmail);
+      if (selectedMailbox === 'ALL_MAIL') {
+        return parsedEmails.filter((email: any) => !email.labelIds.includes('INBOX'));
+      }
+      return parsedEmails;
+    },
   });
 
   const {
@@ -714,6 +724,66 @@ export default function Inbox() {
     }
   };
 
+  // Hàm xóa email
+  const handleDeleteEmail = async (emailId?: string) => {
+    const id = emailId || selectedEmail;
+    if (!id) return;
+    
+    if (!confirm('Bạn chắc chắn muốn xóa email này?')) return;
+    
+    try {
+      await api.delete(`/gmail/emails/${id}`);
+      
+      // Đóng detail view
+      setSelectedEmail(null);
+      setSelectedEmails(new Set());
+      
+      // Invalidate cache
+      queryClient.invalidateQueries({ queryKey: ['emails', selectedMailbox] });
+      queryClient.invalidateQueries({ queryKey: ['mailboxes'] });
+      
+      toast.success('Xóa email thành công!');
+    } catch (err: any) {
+      console.error('Delete email error:', err);
+      console.error('Response:', err.response?.data);
+      const errorMsg = err.response?.data?.message || 'Lỗi khi xóa email!';
+      if (errorMsg.includes('insufficient permissions') || errorMsg.includes('Insufficient permissions')) {
+        toast.error('Cần cấp quyền. Vui lòng đăng nhập lại.');
+      } else {
+        toast.error(errorMsg);
+      }
+    }
+  };
+
+  // Hàm lưu trữ email
+  const handleArchiveEmail = async (emailId?: string) => {
+    const id = emailId || selectedEmail;
+    if (!id) return;
+    
+    try {
+      await api.patch(`/gmail/emails/${id}/archive`, {});
+      
+      // Đóng detail view
+      setSelectedEmail(null);
+      setSelectedEmails(new Set());
+      
+      // Invalidate cache
+      queryClient.invalidateQueries({ queryKey: ['emails', selectedMailbox] });
+      queryClient.invalidateQueries({ queryKey: ['mailboxes'] });
+      
+      toast.success('Lưu trữ email thành công!');
+    } catch (err: any) {
+      console.error('Archive email error:', err);
+      console.error('Response:', err.response?.data);
+      const errorMsg = err.response?.data?.message || 'Lỗi khi lưu trữ email!';
+      if (errorMsg.includes('insufficient permissions') || errorMsg.includes('Insufficient permissions')) {
+        toast.error('Cần cấp quyền. Vui lòng đăng nhập lại.');
+      } else {
+        toast.error(errorMsg);
+      }
+    }
+  };
+
   // Hàm refresh emails
   const handleRefresh = () => {
     queryClient.invalidateQueries({ queryKey: ['emails', selectedMailbox] });
@@ -962,6 +1032,28 @@ export default function Inbox() {
             </button>
           )}
           
+          {/* Archive Button - hiện khi chọn email hoặc có email được chọn */}
+          {(selectedEmail || selectedEmails.size > 0) && (
+            <button
+              className="p-2 hover:bg-gray-200 rounded"
+              onClick={() => handleArchiveEmail()}
+              title="Lưu trữ"
+            >
+              <FolderArrowRight20Regular className="text-blue-600" />
+            </button>
+          )}
+          
+          {/* Delete Button - hiện khi chọn email hoặc có email được chọn */}
+          {(selectedEmail || selectedEmails.size > 0) && (
+            <button
+              className="p-2 hover:bg-gray-200 rounded text-red-600 hover:text-red-700"
+              onClick={() => handleDeleteEmail()}
+              title="Xóa"
+            >
+              <FiTrash2 size={16} />
+            </button>
+          )}
+          
           <div className="flex-1" />
           
           {/* Keyboard shortcuts help */}
@@ -1002,7 +1094,7 @@ export default function Inbox() {
           <ul>
             {mailboxes
               ?.filter((mailbox: any) => {
-                const allowedSystemLabels = ['INBOX', 'STARRED', 'SENT', 'DRAFT', 'SPAM', 'IMPORTANT', 'UNREAD'];
+                const allowedSystemLabels = ['INBOX', 'STARRED', 'SENT', 'DRAFT', 'SPAM', 'IMPORTANT', 'UNREAD', 'ALL_MAIL'];
                 // Giữ lại các label hệ thống được phép hoặc label không phải là hệ thống (custom labels)
                 return (
                   allowedSystemLabels.includes(mailbox.id) ||
@@ -1030,11 +1122,11 @@ export default function Inbox() {
                 <span className="mr-2">
                   {
                     mailboxIcons[
-                      (mailbox.name as string).toLowerCase() as keyof typeof mailboxIcons
+                      (mailbox.id === 'ALL_MAIL' ? 'all_mail' : (mailbox.name as string).toLowerCase()) as keyof typeof mailboxIcons
                     ] || mailboxIcons.default
                   }
                 </span>
-                <span className="flex-1 min-w-0 truncate">{mailbox.name}</span>
+                <span className="flex-1 min-w-0 truncate">{mailbox.id === 'ALL_MAIL' ? 'Archive' : mailbox.name}</span>
                 {(mailbox.messagesUnread || 0) > 0 && (
                   <span className="mailbox-unread-badge">
                     {mailbox.messagesUnread || 0}
@@ -1083,7 +1175,7 @@ export default function Inbox() {
                   <div className="absolute left-0 top-full mt-2 w-56 bg-white border border-gray-200 rounded-lg shadow-lg z-20 max-h-96 overflow-y-auto">
                     {mailboxes
                       ?.filter((mailbox: any) => {
-                        const allowedSystemLabels = ['INBOX', 'STARRED', 'SENT', 'DRAFT', 'SPAM'];
+                        const allowedSystemLabels = ['INBOX', 'STARRED', 'SENT', 'DRAFT', 'SPAM', 'ALL_MAIL'];
                         return (
                           allowedSystemLabels.includes(mailbox.id) ||
                           !mailbox.id.startsWith('CATEGORY_')
@@ -1101,8 +1193,12 @@ export default function Inbox() {
                         }`}
                       >
                         <div className="flex items-center gap-3 min-w-0">
-                          <span className="text-lg">{mailboxIcons[mailbox.id as keyof typeof mailboxIcons]}</span>
-                          <span className="flex-1 min-w-0 truncate">{mailbox.name}</span>
+                          <span className="text-lg">
+                            {mailboxIcons[
+                              (mailbox.id === 'ALL_MAIL' ? 'all_mail' : mailbox.id.toLowerCase()) as keyof typeof mailboxIcons
+                            ]}
+                          </span>
+                          <span className="flex-1 min-w-0 truncate">{mailbox.id === 'ALL_MAIL' ? 'Archive' : mailbox.name}</span>
                         </div>
                       </button>
                     ))}
@@ -1340,6 +1436,28 @@ export default function Inbox() {
                       ) : (
                         <FaRegStar className="w-5 h-5 text-gray-600" />
                       )}
+                    </button>
+                    
+                    {/* Archive Button */}
+                    <button 
+                      onClick={() => handleArchiveEmail(email.id)}
+                      className="p-2 hover:bg-gray-100 rounded"
+                      title="Lưu trữ"
+                      onMouseEnter={() => setIsArchiveHoveredDetail(true)}
+                      onMouseLeave={() => setIsArchiveHoveredDetail(false)}
+                    >
+                      <FolderArrowRight20Regular className={isArchiveHoveredDetail ? "text-blue-600" : "text-gray-600"} />
+                    </button>
+                    
+                    {/* Delete Button */}
+                    <button 
+                      onClick={() => handleDeleteEmail(email.id)}
+                      className="p-2 hover:bg-gray-100 rounded"
+                      title="Xóa"
+                      onMouseEnter={() => setIsDeleteHoveredDetail(true)}
+                      onMouseLeave={() => setIsDeleteHoveredDetail(false)}
+                    >
+                      <FiTrash2 className={`w-5 h-5 ${isDeleteHoveredDetail ? "text-red-600" : "text-gray-600"}`} />
                     </button>
                     
                     {/* More Menu with Delete */}

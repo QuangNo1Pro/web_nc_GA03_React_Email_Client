@@ -1,4 +1,4 @@
-import { Injectable, InternalServerErrorException } from '@nestjs/common';
+import { Injectable, InternalServerErrorException, ForbiddenException } from '@nestjs/common';
 import { google, gmail_v1 } from 'googleapis';
 import { UsersService } from '../users/users.service';
 import { ConfigService } from '@nestjs/config';
@@ -13,17 +13,15 @@ export class GmailService {
   private async getGmailClient(userId: string) {
     const user = await this.usersService.findById(userId);
     
-    // FIX 1: Chỉ bắt buộc phải có access token. 
-    // Refresh token có thể thiếu nếu user chưa re-consent, nhưng vẫn cho phép chạy tạm.
     if (!user || !user.googleAccessToken) {
       throw new InternalServerErrorException(
         'User not found or not authenticated with Google',
       );
     }
-
-    const clientId = this.configService.get('GOOGLE_CLIENT_ID');
-    const clientSecret = this.configService.get('GOOGLE_CLIENT_SECRET');
-    const callbackUrl = this.configService.get('GOOGLE_CALLBACK_URL');
+    
+    const clientId = this.configService.get<string>('GOOGLE_CLIENT_ID');
+    const clientSecret = this.configService.get<string>('GOOGLE_CLIENT_SECRET');
+    const callbackUrl = this.configService.get<string>('GOOGLE_CALLBACK_URL');
 
     if (!clientId || !clientSecret || !callbackUrl) {
       throw new InternalServerErrorException('Google credentials not configured');
@@ -35,31 +33,41 @@ export class GmailService {
       callbackUrl,
     );
 
-    // FIX 2: Tạo object credentials an toàn
     const credentials: any = {
       access_token: user.googleAccessToken,
     };
     
-    // Chỉ thêm refresh_token nếu nó tồn tại trong DB
     if (user.googleRefreshToken) {
       credentials.refresh_token = user.googleRefreshToken;
     }
 
     oauth2Client.setCredentials(credentials);
 
-    // Setup listener để lưu token mới nếu có (quan trọng cho auto-refresh)
     oauth2Client.on('tokens', async (tokens) => {
       if (tokens.access_token) {
         await this.usersService.setGoogleTokens(
           userId,
           tokens.access_token,
-          // Nếu Google trả về refresh token mới thì lưu, không thì giữ cái cũ (nếu có)
           tokens.refresh_token || user.googleRefreshToken || '' 
         );
       }
     });
 
-    return google.gmail({ version: 'v1', auth: oauth2Client });
+    try {
+      const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
+      await gmail.users.getProfile({ userId: 'me' }); 
+      return gmail;
+    } catch (error: any) { // Explicitly type error as 'any' for simpler property access for now
+      if (error.response && error.response.status === 401) {
+        console.error(`Authentication error for user ${userId}:`, error.message);
+        await this.usersService.setGoogleTokens(userId, '', ''); 
+        throw new ForbiddenException(
+          'Google authentication expired or invalid. Please re-authenticate.',
+        );
+      }
+      console.error('Error in getGmailClient:', error);
+      throw new InternalServerErrorException('Failed to initialize Gmail client');
+    }
   }
 
   async getMailboxes(userId: string) {
@@ -152,6 +160,8 @@ export class GmailService {
         formattedLabelId = labelId.toUpperCase();
       }
       // -----------------------
+      
+      console.log(`Fetching emails for label: ${formattedLabelId}`);
 
       const res = await gmail.users.messages.list({
         userId: 'me',
@@ -160,29 +170,37 @@ export class GmailService {
       });
 
       if (!res.data.messages) {
+        console.log('No messages found for label:', formattedLabelId);
         return {
           messages: [],
           nextPageToken: res.data.nextPageToken,
         };
       }
       
+      console.log(`Found ${res.data.messages.length} messages for label: ${formattedLabelId}`);
+      
       const messages = await Promise.all(
         res.data.messages.map(async (message) => {
-          if (!message.id) {
+          try {
+            if (!message.id) {
+              return null;
+            }
+            const msg = await gmail.users.messages.get({
+              userId: 'me',
+              id: message.id,
+              format: 'metadata',
+              metadataHeaders: ['From', 'To', 'Subject', 'Date'],
+            });
+            return {
+              id: msg.data.id,
+              snippet: msg.data.snippet,
+              payload: msg.data.payload,
+              labelIds: msg.data.labelIds,
+            };
+          } catch (err) {
+            console.error(`Failed to get message details for ${message.id}:`, err);
             return null;
           }
-          const msg = await gmail.users.messages.get({
-            userId: 'me',
-            id: message.id,
-            format: 'metadata',
-            metadataHeaders: ['From', 'To', 'Subject', 'Date'],
-          });
-          return {
-            id: msg.data.id,
-            snippet: msg.data.snippet,
-            payload: msg.data.payload,
-            labelIds: msg.data.labelIds,
-          };
         }),
       );
 
@@ -191,6 +209,7 @@ export class GmailService {
         nextPageToken: res.data.nextPageToken,
       };
     } catch (error) {
+      console.error('Failed to get emails:', error);
       throw new InternalServerErrorException('Failed to get emails');
     }
   }
@@ -275,7 +294,42 @@ export class GmailService {
     return res.data;
   }
 
+  async deleteEmail(userId: string, messageId: string) {
+    try {
+      const gmail = await this.getGmailClient(userId);
+      await gmail.users.messages.delete({
+        userId: 'me',
+        id: messageId,
+      });
+      return { success: true };
+    } catch (error: any) {
+      if (error.message?.includes('insufficient authentication scopes')) {
+        throw new InternalServerErrorException('Insufficient permissions. Please re-authenticate to grant delete access.');
+      }
+      console.error('Error deleting email:', error);
+      throw new InternalServerErrorException('Failed to delete email');
+    }
+  }
 
+  async archiveEmail(userId: string, messageId: string) {
+    try {
+      const gmail = await this.getGmailClient(userId);
+      const res = await gmail.users.messages.modify({
+        userId: 'me',
+        id: messageId,
+        requestBody: {
+          removeLabelIds: ['INBOX'],
+        },
+      });
+      return res.data;
+    } catch (error: any) {
+      if (error.message?.includes('insufficient authentication scopes')) {
+        throw new InternalServerErrorException('Insufficient permissions. Please re-authenticate to grant archive access.');
+      }
+      console.error('Error archiving email:', error);
+      throw new InternalServerErrorException('Failed to archive email');
+    }
+  }
 
   async sendEmail(
     userId: string,
