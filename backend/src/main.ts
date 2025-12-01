@@ -11,8 +11,11 @@ async function bootstrap() {
   const config = app.get(ConfigService);
 
   app.enableCors({
-    origin: config.get<string>('CORS_ORIGIN') || true,
+    origin: config.get<string>('CORS_ORIGIN') || 'http://localhost:5173',
     credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'Cookie'],
+    exposedHeaders: ['Set-Cookie'],
   });
 
   // Increase payload size limit

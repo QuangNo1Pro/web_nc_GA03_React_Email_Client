@@ -37,4 +37,3 @@ import { GmailModule } from '../gmail/gmail.module';
   controllers: [AuthController],
 })
 export class AuthModule {}
-

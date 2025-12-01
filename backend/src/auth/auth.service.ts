@@ -1,4 +1,3 @@
-
 import { Injectable, ForbiddenException } from '@nestjs/common';
 import { UsersService } from '../users/users.service';
 import { JwtService } from '@nestjs/jwt';
@@ -21,47 +20,83 @@ export class AuthService {
     return null;
   }
 
+  // ======================================
+  // GOOGLE LOGIN
+  // ======================================
   async googleLogin(user: any) {
     if (!user) {
-      throw new ForbiddenException('No user from google');
+      throw new ForbiddenException('No user from Google');
     }
 
+    // user = { id, email, firstName, lastName, picture, accessToken, refreshToken }
+
+    const fullName = `${user.firstName} ${user.lastName}`;
+
     let dbUser = await this.usersService.findByGoogleId(user.id);
+
     if (!dbUser) {
+      // --- CREATE NEW USER ---
       dbUser = await this.usersService.createWithGoogle(
         user.email,
         user.id,
         user.accessToken,
         user.refreshToken,
+        user.picture,
+        fullName,
       );
     } else {
+      // --- UPDATE EXISTING USER ---
       if (user.refreshToken) {
         await this.usersService.updateGoogleTokens(
           user.id,
           user.accessToken,
           user.refreshToken,
+          user.picture,
+          fullName,                        // <<--- FIX: thêm name
         );
       } else {
         await this.usersService.updateGoogleAccessToken(
           user.id,
           user.accessToken,
+          user.picture,
+          fullName,                        // <<--- FIX: thêm name
         );
       }
+
       dbUser = await this.usersService.findByGoogleId(user.id);
+    }
+
+    if (!dbUser) {
+      throw new ForbiddenException('Failed to create or find Google user');
+    }
+
+    // Prefetch Gmail (optional)
+    try {
+      await this.gmailService.prefetchMailboxesAndEmails(dbUser._id.toString());
+    } catch (err: unknown) {
+      const e = err as Error;
+      console.error('Prefetch Gmail failed:', e.message);
     }
 
     return this.login(dbUser);
   }
 
+  // ======================================
+  // LOGIN (GENERATE JWT)
+  // ======================================
   async login(user: any) {
-    const payload = { email: user.email, sub: user._id };
-    const [accessToken, refreshToken] = await Promise.all([
-      this.jwtService.sign(payload),
-      this.jwtService.sign(payload, {
-        secret: process.env.JWT_REFRESH_SECRET,
-        expiresIn: '7d',
-      }),
-    ]);
+    const payload = {
+      sub: user._id,
+      email: user.email,
+      name: user.name ?? null,
+      picture: user.picture ?? null,
+    };
+
+    const accessToken = this.jwtService.sign(payload);
+    const refreshToken = this.jwtService.sign(payload, {
+      secret: process.env.JWT_REFRESH_SECRET,
+      expiresIn: '7d',
+    });
 
     await this.usersService.setCurrentRefreshToken(user._id, refreshToken);
 
@@ -71,15 +106,27 @@ export class AuthService {
     };
   }
 
+  // ======================================
+  // LOGOUT
+  // ======================================
   async logout(userId: string) {
     await this.gmailService.revokeToken(userId);
     return this.usersService.setCurrentRefreshToken(userId, null);
   }
 
+  // ======================================
+  // REFRESH TOKEN
+  // ======================================
   async refreshToken(user: any) {
-    const payload = { email: user.email, sub: user._id };
-    const accessToken = this.jwtService.sign(payload);
-    return { access_token: accessToken };
+    const payload = {
+      sub: user._id,
+      email: user.email,
+      name: user.name,
+      picture: user.picture,
+    };
+
+    return {
+      access_token: this.jwtService.sign(payload),
+    };
   }
 }
-

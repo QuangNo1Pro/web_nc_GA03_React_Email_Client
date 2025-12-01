@@ -27,16 +27,20 @@ export default function Register() {
   } = useForm<FormValues>({
     resolver: zodResolver(schema),
   });
+
   const navigate = useNavigate();
   const [serverMessage, setServerMessage] = useState<string | null>(null);
 
-  const mutation = useMutation<any, any, FormValues, unknown>({
-    mutationFn: (data: FormValues) =>
+  // ⭐ mutation chỉ nhận email + password
+  const mutation = useMutation<any, any, { email: string; password: string }>({
+    mutationFn: (data) =>
       api.post('/auth/register', data).then((res) => res.data),
-    onSuccess: (data) => {
+
+    onSuccess: () => {
       setServerMessage('Đăng ký thành công — chuyển hướng tới Login...');
       setTimeout(() => navigate('/login'), 1200);
     },
+
     onError: (err: any) => {
       setServerMessage(err?.response?.data?.message || 'Lỗi khi đăng ký');
     },
@@ -44,94 +48,103 @@ export default function Register() {
 
   const onSubmit = (data: FormValues) => {
     setServerMessage(null);
-    const { confirmPassword, ...rest } = data;
-    mutation.mutate(rest);
+
+    // ⭐ Chỉ gửi email + password
+    const { email, password } = data;
+
+    mutation.mutate({ email, password });
   };
 
   return (
-    <div className="flex min-h-screen">
-      <div className="hidden lg:flex flex-1 items-center justify-center bg-indigo-700">
-        <div className="max-w-md text-white text-center">
+    <div className="flex min-h-screen" style={{ backgroundColor: 'var(--bg-primary)' }}>
+      <div className="hidden lg:flex flex-1 items-center justify-center" style={{ backgroundColor: 'var(--accent-primary)' }}>
+        <div className="max-w-md text-center" style={{ color: 'white' }}>
           <h2 className="text-3xl font-bold">Join Us!</h2>
-          <p className="mt-4">
-            Create an account to get started with our platform.
-          </p>
+          <p className="mt-4">Create an account to get started with our platform.</p>
         </div>
       </div>
-      <div className="flex-1 flex items-center justify-center p-12 bg-gray-50">
+
+      <div className="flex-1 flex items-center justify-center p-12" style={{ backgroundColor: 'var(--bg-secondary)' }}>
         <div className="max-w-md w-full">
-          <div>
-            <h2 className="mt-6 text-center text-3xl font-extrabold text-gray-900">
-              Create your account
-            </h2>
-          </div>
+          <h2 className="mt-6 text-center text-3xl font-extrabold" style={{ color: 'var(--text-primary)' }}>
+            Create your account
+          </h2>
+
           <form className="mt-8 space-y-6" onSubmit={handleSubmit(onSubmit)}>
             <div className="rounded-md shadow-sm -space-y-px">
-              <div>
-                <label htmlFor="email-address" className="sr-only">
-                  Email address
-                </label>
-                <input
-                  id="email-address"
-                  type="email"
-                  autoComplete="email"
-                  required
-                  {...register('email')}
-                  className="appearance-none rounded-none relative block w-full px-3 py-2 border border-gray-300 placeholder-gray-500 text-gray-900 rounded-t-md focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 focus:z-10 sm:text-sm"
-                  placeholder="Email address"
-                />
-              </div>
-              <div>
-                <label htmlFor="password" className="sr-only">
-                  Password
-                </label>
-                <input
-                  id="password"
-                  type="password"
-                  autoComplete="new-password"
-                  required
-                  {...register('password')}
-                  className="appearance-none rounded-none relative block w-full px-3 py-2 border border-gray-300 placeholder-gray-500 text-gray-900 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 focus:z-10 sm:text-sm"
-                  placeholder="Password"
-                />
-              </div>
-              <div>
-                <label htmlFor="confirm-password" className="sr-only">
-                  Confirm Password
-                </label>
-                <input
-                  id="confirm-password"
-                  type="password"
-                  autoComplete="new-password"
-                  required
-                  {...register('confirmPassword')}
-                  className="appearance-none rounded-none relative block w-full px-3 py-2 border border-gray-300 placeholder-gray-500 text-gray-900 rounded-b-md focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 focus:z-10 sm:text-sm"
-                  placeholder="Confirm Password"
-                />
-              </div>
+              <input
+                {...register('email')}
+                type="email"
+                placeholder="Email address"
+                className="block w-full px-3 py-2 border rounded-t-md"
+                style={{
+                  backgroundColor: 'var(--bg-primary)',
+                  borderColor: 'var(--border-primary)',
+                  color: 'var(--text-primary)'
+                }}
+              />
+              {errors.email && <p className="text-red-600">{errors.email.message}</p>}
+
+              <input
+                {...register('password')}
+                type="password"
+                placeholder="Password"
+                className="block w-full px-3 py-2 border"
+                style={{
+                  backgroundColor: 'var(--bg-primary)',
+                  borderColor: 'var(--border-primary)',
+                  color: 'var(--text-primary)'
+                }}
+              />
+              {errors.password && <p className="text-red-600">{errors.password.message}</p>}
+
+              <input
+                {...register('confirmPassword')}
+                type="password"
+                placeholder="Confirm Password"
+                className="block w-full px-3 py-2 border rounded-b-md"
+                style={{
+                  backgroundColor: 'var(--bg-primary)',
+                  borderColor: 'var(--border-primary)',
+                  color: 'var(--text-primary)'
+                }}
+              />
+              {errors.confirmPassword && (
+                <p className="text-red-600">{errors.confirmPassword.message}</p>
+              )}
             </div>
 
             {serverMessage && (
               <div
-                className={`p-2 rounded mb-4 ${
-                  mutation.isError
-                    ? 'bg-red-100 text-red-800'
-                    : 'bg-green-100 text-green-800'
+                className={`p-2 rounded ${
+                  mutation.isError ? 'bg-red-100 text-red-800' : 'bg-green-100 text-green-800'
                 }`}
               >
                 {serverMessage}
               </div>
             )}
 
-            <div>
-              <button
-                type="submit"
-                className="group relative w-full flex justify-center py-2 px-4 border border-transparent text-sm font-medium rounded-md text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"
-                disabled={mutation.isLoading}
-              >
-                {mutation.isLoading ? 'Creating account...' : 'Create account'}
-              </button>
-            </div>
+            <button
+              type="submit"
+              className="w-full py-2 px-4 rounded-md"
+              style={{
+                backgroundColor: 'var(--accent-primary)',
+                color: 'white'
+              }}
+              disabled={mutation.isPending}
+              onMouseEnter={(e) => {
+                if (!mutation.isPending) {
+                  e.currentTarget.style.backgroundColor = 'var(--accent-primary-hover)';
+                }
+              }}
+              onMouseLeave={(e) => {
+                if (!mutation.isPending) {
+                  e.currentTarget.style.backgroundColor = 'var(--accent-primary)';
+                }
+              }}
+            >
+              {mutation.isPending ? 'Creating account...' : 'Create account'}
+            </button>
           </form>
         </div>
       </div>
