@@ -1,13 +1,15 @@
-
 import {
   Injectable,
   InternalServerErrorException,
   ForbiddenException,
   BadRequestException,
+  Inject,
+  forwardRef,
 } from '@nestjs/common';
 import { google, gmail_v1 } from 'googleapis';
 import { UsersService } from '../users/users.service';
 import { ConfigService } from '@nestjs/config';
+import { SseService } from './sse.service';
 // ...existing code...
 
 
@@ -70,6 +72,7 @@ export class GmailService {
   constructor(
     private readonly usersService: UsersService,
     private readonly configService: ConfigService,
+    private readonly sseService: SseService,
   ) { }
 
   private async getGmailClient(userId: string) {
@@ -146,8 +149,8 @@ export class GmailService {
 
       if (mailboxes && mailboxes.length > 0) {
         return mailboxes.map(m => ({
-          id: m.id,
-          name: m.name,
+          id: m.id, // Real Gmail label ID (e.g., "INBOX", "Label_123", "SENT")
+          name: m.name, // Human-readable name
           messagesTotal: m.messagesTotal,
           messagesUnread: m.id === 'INBOX' ? inboxUnread : m.messagesUnread,
         }));
@@ -160,10 +163,10 @@ export class GmailService {
 
       const labels = (res.data.labels || []).filter(label => label.id);
 
-      // Save to database
+      // Save to database - using Gmail's actual label IDs
       const labelsWithUnreadCount = labels.map((label) => {
         return {
-          id: label.id!,
+          id: label.id!, // Use Gmail's real ID
           name: label.name || 'Unknown',
           messagesTotal: label.messagesTotal || 0,
           messagesUnread: label.messagesUnread || 0,
@@ -179,37 +182,35 @@ export class GmailService {
         inboxLabel.messagesUnread = inboxUnreadApi;
       }
 
+      console.log('✅ Returning mailboxes with real Gmail label IDs:', labelsWithUnreadCount.map(l => ({ id: l.id, name: l.name })));
       return labelsWithUnreadCount;
     } catch (error) {
-      console.error('Failed to get mailboxes:', error);
-      throw new InternalServerErrorException('Failed to get mailboxes');
+      console.error('❌ Failed to get mailboxes:', (error as any)?.message || error);
+      // Return empty array instead of throwing to prevent frontend crash
+      return [];
     }
   }
 
   async getEmails(userId: string, labelId: string, pageToken?: string) {
     try {
-      // Chuẩn hóa labelId
-      let formattedLabelId = labelId;
-      const systemLabels = ['inbox', 'sent', 'trash', 'spam', 'draft', 'starred', 'unread', 'important'];
-
-      if (systemLabels.includes(labelId.toLowerCase())) {
-        formattedLabelId = labelId.toUpperCase();
-      }
-
-      console.log(`Getting emails for labelId: ${labelId} -> formatted: ${formattedLabelId}`);
+      console.log(`🔍 Getting emails for labelId: "${labelId}"`);
 
       const gmail = await this.getGmailClient(userId);
 
+      // Gmail uses actual label IDs now (passed from frontend)
+      // No need to normalize - use exactly what Gmail API expects
+      const formattedLabelId = labelId;
+
       // For DRAFT, always fetch from Gmail API, SKIP database entirely
       if (formattedLabelId === 'DRAFT') {
-        console.log('Fetching drafts from Gmail API (skipping database)');
+        console.log('📧 Fetching drafts from Gmail API (skipping database)');
         // Jump directly to draft fetching logic below
       } else {
         // Get emails from database first for non-draft labels
         const dbEmails = await this.usersService.getEmailsByLabel(userId, formattedLabelId, 1, 200);
-        console.log(`Found ${dbEmails?.length || 0} emails in database for label: ${formattedLabelId}`);
+        console.log(`📦 Found ${dbEmails?.length || 0} emails in database for label: ${formattedLabelId}`);
         if (dbEmails && dbEmails.length > 0) {
-          console.log(`Returning ${dbEmails.length} emails from database for label: ${formattedLabelId}`);
+          console.log(`✅ Returning ${dbEmails.length} emails from database for label: ${formattedLabelId}`);
           return {
             messages: dbEmails.map(e => ({
               id: e.messageId,
@@ -238,10 +239,10 @@ export class GmailService {
           };
         }
         console.log(`Found ${res.data.drafts.length} drafts`);
-        const messages = await Promise.all(
+        const messages = await Promise.allSettled(
           res.data.drafts.map(async (draft) => {
+            if (!draft.id) return null;
             try {
-              if (!draft.id) return null;
               const msg = await gmail.users.drafts.get({
                 userId: 'me',
                 id: draft.id,
@@ -285,13 +286,24 @@ export class GmailService {
                 attachments: [], // TODO: parse attachments if needed
               };
             } catch (err) {
-              console.error(`Failed to get draft details for ${draft.id}:`, err);
+              console.warn(`Failed to get draft details for ${draft.id}:`, (err as any)?.message || err);
               return null;
             }
           })
         );
+        
+        // Extract successful results
+        const validMessages = messages
+          .filter(result => result.status === 'fulfilled' && result.value !== null)
+          .map(result => (result as PromiseFulfilledResult<any>).value);
+        
+        const failedCount = messages.length - validMessages.length;
+        if (failedCount > 0) {
+          console.warn(`Successfully fetched ${validMessages.length}/${messages.length} drafts, ${failedCount} failed`);
+        }
+        
         return {
-          messages: messages.filter((m) => m),
+          messages: validMessages,
           nextPageToken: res.data.nextPageToken,
         };
       } else {
@@ -309,12 +321,14 @@ export class GmailService {
           };
         }
         console.log(`Found ${res.data.messages.length} messages for label: ${formattedLabelId}`);
-        const messages = await Promise.all(
+        
+        // Fetch message details with better error handling
+        const messages = await Promise.allSettled(
           res.data.messages.map(async (message) => {
+            if (!message.id) {
+              return null;
+            }
             try {
-              if (!message.id) {
-                return null;
-              }
               const msg = await gmail.users.messages.get({
                 userId: 'me',
                 id: message.id,
@@ -328,19 +342,36 @@ export class GmailService {
                 labelIds: msg.data.labelIds,
               };
             } catch (err) {
-              console.error(`Failed to get message details for ${message.id}:`, err);
+              console.warn(`Failed to get message details for ${message.id}:`, (err as any)?.message || err);
+              // Return null for failed messages, don't break the whole request
               return null;
             }
           }),
         );
+        
+        // Extract successful results and filter out nulls
+        const validMessages = messages
+          .filter(result => result.status === 'fulfilled' && result.value !== null)
+          .map(result => (result as PromiseFulfilledResult<any>).value);
+        
+        const failedCount = messages.length - validMessages.length;
+        if (failedCount > 0) {
+          console.warn(`Successfully fetched ${validMessages.length}/${messages.length} messages for ${formattedLabelId}, ${failedCount} failed`);
+        }
+        
         return {
-          messages: messages.filter((m) => m),
+          messages: validMessages,
           nextPageToken: res.data.nextPageToken,
         };
       }
     } catch (error) {
-      console.error('Failed to get emails:', error);
-      throw new InternalServerErrorException('Failed to get emails');
+      console.error('Failed to get emails for label:', labelId, (error as any)?.message || error);
+      console.error('Error details:', (error as any)?.response?.data || error);
+      // Return empty array instead of throwing error to prevent frontend crash
+      return {
+        messages: [],
+        nextPageToken: undefined,
+      };
     }
   }
 
@@ -940,6 +971,11 @@ await gmail.users.messages.modify({
       // Fetch changed messages (metadata only)
       const changedEmails = [];
       for (const msgId of changedMessageIds) {
+        // Skip if already in deleted list
+        if (deletedMessageIds.has(msgId)) {
+          continue;
+        }
+        
         try {
           const msg = await gmail.users.messages.get({
             userId: 'me',
@@ -954,14 +990,24 @@ await gmail.users.messages.modify({
             labelIds: msg.data.labelIds || [],
             internalDate: msg.data.internalDate,
           });
-        } catch (err) {
-          console.error(`Failed to fetch message ${msgId}:`, err);
+        } catch (err: any) {
+          // If message not found (404), it was deleted - remove from DB
+          if (err.code === 404 || err.status === 404) {
+            console.warn(`Message ${msgId} not found (deleted), removing from DB`);
+            await this.usersService.deleteEmailById(userId, msgId);
+            deletedMessageIds.add(msgId); // Track as deleted
+          } else {
+            console.error(`Failed to fetch message ${msgId}:`, err.message || err);
+          }
         }
       }
 
       // Save changed emails
       if (changedEmails.length > 0) {
+        console.log(`Saving ${changedEmails.length} changed emails to DB...`);
+        console.log('Changed email IDs:', changedEmails.map(e => e.id).join(', '));
         await this.usersService.saveEmails(userId, changedEmails);
+        console.log(`✅ Saved ${changedEmails.length} emails successfully`);
       }
 
       // Update mailboxes (quick count update)
@@ -1092,6 +1138,65 @@ await gmail.users.messages.modify({
     } catch (error) {
       console.error('Failed to prefetch mailboxes and emails:', error);
       throw new InternalServerErrorException('Failed to prefetch mailboxes and emails');
+    }
+  }
+
+  /**
+   * Xử lý notification từ Google Pub/Sub khi có email mới
+   */
+  async processPubSubNotification(emailAddress: string, historyId: string) {
+    console.log(`[Gmail] Processing Pub/Sub notification for ${emailAddress}, historyId: ${historyId}`);
+
+    try {
+      // 1. Tìm user theo email
+      const user = await this.usersService.findByEmail(emailAddress);
+      if (!user) {
+        console.warn(`[Gmail] User not found: ${emailAddress}`);
+        return;
+      }
+
+      const userId = user._id.toString();
+
+      // 2. Lấy Gmail client
+      const gmail = await this.getGmailClient(userId);
+
+      // 3. Lấy lịch sử thay đổi từ historyId
+      const historyResponse = await gmail.users.history.list({
+        userId: 'me',
+        startHistoryId: historyId,
+        historyTypes: ['messageAdded', 'messageDeleted', 'labelAdded', 'labelRemoved'],
+      });
+
+      if (!historyResponse.data.history || historyResponse.data.history.length === 0) {
+        console.log('[Gmail] No history changes found');
+        return;
+      }
+
+      // 4. Đếm số email mới
+      let newMessagesCount = 0;
+
+      for (const record of historyResponse.data.history) {
+        if (record.messagesAdded) {
+          newMessagesCount += record.messagesAdded.length;
+        }
+      }
+
+      console.log(`[Gmail] Found ${newMessagesCount} new messages for user ${userId}`);
+
+      // 5. Broadcast SSE event đến frontend
+      this.sseService.broadcast(userId, {
+        type: 'gmail-updated',
+        userId,
+        data: {
+          newMessagesCount,
+          historyId: historyResponse.data.historyId,
+        },
+      });
+
+      console.log(`[Gmail] Successfully notified user ${userId} via SSE`);
+    } catch (err) {
+      console.error(`[Gmail] Failed to process Pub/Sub notification:`, err);
+      throw err;
     }
   }
 }

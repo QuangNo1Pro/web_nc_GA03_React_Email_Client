@@ -14,7 +14,7 @@ async function bootstrap() {
     origin: config.get<string>('CORS_ORIGIN') || 'http://localhost:5173',
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'Cookie'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'Cookie', 'Cache-Control', 'Accept'], // Added Cache-Control and Accept
     exposedHeaders: ['Set-Cookie'],
   });
 
@@ -34,6 +34,12 @@ async function bootstrap() {
 
   const port = config.get<number>('PORT') || 3000;
   await app.listen(port);
+  
+  // Increase server timeout for SSE (long-lived connections)
+  const server = app.getHttpServer();
+  server.keepAliveTimeout = 620000; // 10+ minutes
+  server.headersTimeout = 630000;
+  
   console.log(`Server running on http://localhost:${port}`);
 }
 bootstrap();

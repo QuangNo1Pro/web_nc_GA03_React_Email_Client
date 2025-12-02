@@ -9,8 +9,21 @@ export const fetchMailboxes = async () => {
 };
 
 export const fetchEmails = async (mailboxId: string) => {
-  const { data } = await api.get(`/gmail/mailboxes/${mailboxId}/emails`);
-  return data;
+  try {
+    const { data } = await api.get(`/gmail/mailboxes/${mailboxId}/emails`);
+    // Ensure we always return a valid structure
+    return {
+      messages: data?.messages || [],
+      nextPageToken: data?.nextPageToken || undefined,
+    };
+  } catch (error: any) {
+    console.error('Error fetching emails:', error?.response?.data || error.message);
+    // Return empty array instead of throwing to prevent "Error loading emails"
+    return {
+      messages: [],
+      nextPageToken: undefined,
+    };
+  }
 };
 
 export const fetchEmail = async (emailId: string) => {

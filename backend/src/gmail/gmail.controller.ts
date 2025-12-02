@@ -9,22 +9,155 @@ import {
   Body,
   Delete,
   Post,
+  Res,
+  Req,
+  Headers,
 } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
 import { GmailService } from './gmail.service';
-import { Request as ExpressRequest } from 'express';
+import { SseService } from './sse.service';
+import { GmailPollingService } from './gmail-polling.service';
+import { Request as ExpressRequest, Response } from 'express';
 
 @Controller('gmail')
-@UseGuards(AuthGuard('jwt'))
 export class GmailController {
-  constructor(private readonly gmailService: GmailService) { }
+  constructor(
+    private readonly gmailService: GmailService,
+    private readonly sseService: SseService,
+    private readonly gmailPollingService: GmailPollingService,
+  ) { }
 
+  // ========== SSE ENDPOINT (Real-time updates) ==========
+  @Get('events')
+  @UseGuards(AuthGuard('jwt'))
+  async streamEvents(@Req() req: ExpressRequest, @Res() res: Response) {
+    const userId = (req.user as any).userId;
+
+    console.log(`[SSE] ✅ Client connecting: ${userId}`);
+    console.log(`[SSE] Request headers:`, req.headers);
+
+    // Set SSE headers
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+    res.setHeader('X-Accel-Buffering', 'no'); // Disable nginx buffering
+
+    // Prevent response timeout
+    res.setTimeout(0);
+
+    // Register connection
+    this.sseService.addConnection(userId, res);
+
+    // Start Gmail polling for this user
+    console.log(`[Polling] ⏰ Starting polling for user ${userId}`);
+    this.gmailPollingService.startPollingForUser(userId);
+
+    // Send initial connected event
+    res.write('event: connected\n');
+    res.write(`data: ${JSON.stringify({ type: 'connected', userId })}\n\n`);
+
+    // Heartbeat every 30 seconds to keep connection alive
+    const heartbeatInterval = setInterval(() => {
+      try {
+        res.write(': heartbeat\n\n');
+      } catch (err) {
+        clearInterval(heartbeatInterval);
+      }
+    }, 30000);
+
+    // Cleanup on disconnect
+    req.on('close', () => {
+      clearInterval(heartbeatInterval);
+      this.sseService.removeConnection(userId, res);
+      console.log(`[SSE] Client disconnected: ${userId}`);
+      
+      // Stop polling if user has no more SSE connections
+      if (this.sseService.getConnectionCount(userId) === 0) {
+        this.gmailPollingService.stopPollingForUser(userId);
+        console.log(`[Polling] Stopped for user ${userId} (no connections)`);
+      }
+    });
+  }
+
+  // ========== WEBHOOK ENDPOINT (Pub/Sub notifications) ==========
+  @Post('webhook/pubsub')
+  async handlePubSubWebhook(
+    @Headers('authorization') auth: string,
+    @Body() body: any,
+  ) {
+    console.log('[Webhook] Received Pub/Sub notification');
+
+    try {
+      // TODO: Add PubSubGuard để verify token từ Google
+      // Hiện tại skip verification cho testing
+
+      const message = body.message;
+      if (!message || !message.data) {
+        console.warn('[Webhook] Invalid message format');
+        return { success: false, error: 'Invalid message format' };
+      }
+
+      // Decode base64 data
+      const decodedData = Buffer.from(message.data, 'base64').toString('utf-8');
+      const notification = JSON.parse(decodedData);
+
+      console.log('[Webhook] Decoded notification:', notification);
+
+      const { emailAddress, historyId } = notification;
+
+      if (!emailAddress || !historyId) {
+        console.warn('[Webhook] Missing emailAddress or historyId');
+        return { success: false, error: 'Missing required fields' };
+      }
+
+      // Process asynchronously (fire-and-forget)
+      this.gmailService.processPubSubNotification(emailAddress, historyId)
+        .catch(err => console.error('[Webhook] Processing error:', err));
+
+      return { success: true };
+    } catch (err) {
+      console.error('[Webhook] Parse error:', err);
+      return { success: false, error: (err as any).message };
+    }
+  }
+
+  // ========== DEBUG ENDPOINTS ==========
+  @Get('debug/polling-status')
+  @UseGuards(AuthGuard('jwt'))
+  getPollingStatus(@Request() req: ExpressRequest) {
+    const userId = (req.user as any).userId;
+    const activeCount = this.gmailPollingService.getActivePollingCount();
+    const sseCount = this.sseService.getConnectionCount(userId);
+    
+    return {
+      userId,
+      activePollingUsers: activeCount,
+      userSseConnections: sseCount,
+      isPolling: activeCount > 0,
+    };
+  }
+
+  @Post('debug/force-poll')
+  @UseGuards(AuthGuard('jwt'))
+  async forcePoll(@Request() req: ExpressRequest) {
+    const userId = (req.user as any).userId;
+    // Trigger incremental sync manually
+    const result = await this.gmailService.incrementalSync(userId);
+    return {
+      success: true,
+      result,
+    };
+  }
+
+  // ========== EXISTING ENDPOINTS ==========
   @Get('mailboxes')
+  @UseGuards(AuthGuard('jwt'))
   getMailboxes(@Request() req: ExpressRequest) {
     return this.gmailService.getMailboxes((req.user as any).userId);
   }
 
   @Get('mailboxes/:labelId/emails')
+  @UseGuards(AuthGuard('jwt'))
   getEmails(
     @Request() req: ExpressRequest,
     @Param('labelId') labelId: string,
@@ -38,11 +171,13 @@ export class GmailController {
   }
 
   @Get('emails/:messageId')
+  @UseGuards(AuthGuard('jwt'))
   getEmail(@Request() req: ExpressRequest, @Param('messageId') messageId: string) {
     return this.gmailService.getEmail((req.user as any).userId, messageId);
   }
 
   @Patch('emails/:messageId/star')
+  @UseGuards(AuthGuard('jwt'))
   setStarred(
     @Request() req: ExpressRequest,
     @Param('messageId') messageId: string,
@@ -56,6 +191,7 @@ export class GmailController {
   }
 
   @Patch('emails/:messageId/read')
+  @UseGuards(AuthGuard('jwt'))
   setRead(
     @Request() req: ExpressRequest,
     @Param('messageId') messageId: string,
@@ -69,6 +205,7 @@ export class GmailController {
   }
 
   @Patch('emails/bulk-read')
+  @UseGuards(AuthGuard('jwt'))
   async bulkSetRead(
     @Request() req: ExpressRequest,
     @Body('ids') ids: string[],
@@ -82,6 +219,7 @@ export class GmailController {
   }
 
   @Delete('emails/:messageId')
+  @UseGuards(AuthGuard('jwt'))
   deleteEmail(
     @Request() req: ExpressRequest,
     @Param('messageId') messageId: string,
@@ -93,6 +231,7 @@ export class GmailController {
   }
 
   @Patch('emails/:messageId/archive')
+  @UseGuards(AuthGuard('jwt'))
   archiveEmail(
     @Request() req: ExpressRequest,
     @Param('messageId') messageId: string,
@@ -104,7 +243,8 @@ export class GmailController {
   }
 
   @Patch('emails/:messageId/spam')
-moveToSpam(
+  @UseGuards(AuthGuard('jwt'))
+  moveToSpam(
   @Request() req: ExpressRequest,
   @Param('messageId') messageId: string,
 ) {
@@ -114,8 +254,9 @@ moveToSpam(
   );
 }
 
-@Post("emails/:id/move")
-async moveEmail(
+  @Post("emails/:id/move")
+  @UseGuards(AuthGuard('jwt'))
+  async moveEmail(
   @Request() req: ExpressRequest,
   @Param("id") id: string,
   @Body() body: { label: string }
@@ -127,8 +268,9 @@ async moveEmail(
   );
 }
 
-@Post('draft')
-async saveDraft(
+  @Post('draft')
+  @UseGuards(AuthGuard('jwt'))
+  async saveDraft(
   @Request() req: ExpressRequest,
   @Body() body: {
     to: string;
@@ -151,6 +293,7 @@ async saveDraft(
 }
 
   @Post('send')
+  @UseGuards(AuthGuard('jwt'))
   sendEmail(
     @Request() req: ExpressRequest,
     @Body('to') to: string,
@@ -172,6 +315,7 @@ async saveDraft(
   }
 
   @Get('attachments/:messageId/:attachmentId')
+  @UseGuards(AuthGuard('jwt'))
   getAttachment(
     @Request() req: ExpressRequest,
     @Param('messageId') messageId: string,
@@ -185,6 +329,7 @@ async saveDraft(
   }
 
   @Post('refresh')
+  @UseGuards(AuthGuard('jwt'))
   refreshMailboxesAndEmails(@Request() req: ExpressRequest) {
     return this.gmailService.incrementalSync((req.user as any).userId);
   }

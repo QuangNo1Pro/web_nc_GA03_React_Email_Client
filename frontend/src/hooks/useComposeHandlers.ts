@@ -146,7 +146,8 @@ export function useComposeHandlers({
       
       toast.success('Gửi email thành công!');
       
-      // Only invalidate mailboxes for count sync, not emails
+      // Invalidate SENT mailbox to force refetch when user switches to it
+      queryClient.invalidateQueries({ queryKey: ['emails', 'SENT'] });
       queryClient.invalidateQueries({ queryKey: ['mailboxes'] });
       
       // Call refresh callback if provided

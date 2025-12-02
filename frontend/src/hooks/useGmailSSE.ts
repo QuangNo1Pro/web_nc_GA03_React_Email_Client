@@ -25,12 +25,17 @@ export function useGmailSSE(enabled: boolean = true) {
 
   useEffect(() => {
     if (!enabled) {
+      console.log('[SSE] Hook disabled, not connecting');
       return;
     }
+
+    console.log('[SSE] 🚀 Hook mounted and enabled, preparing to connect...');
 
     let isMounted = true;
 
     const connect = () => {
+      console.log('[SSE] 🔌 Connect function called');
+      
       // Abort any existing connection
       if (abortControllerRef.current) {
         abortControllerRef.current.abort();
@@ -38,24 +43,17 @@ export function useGmailSSE(enabled: boolean = true) {
 
       abortControllerRef.current = new AbortController();
 
-      const token = localStorage.getItem('accessToken');
-      
-      if (!token) {
-        console.warn('[SSE] No access token found');
-        return;
-      }
-
       const url = `${API_URL}/gmail/events`;
 
-      console.log('[SSE] Connecting to:', url);
+      console.log('[SSE] 📡 Connecting to:', url);
 
       fetch(url, {
         method: 'GET',
         headers: {
-          'Authorization': `Bearer ${token}`,
           'Accept': 'text/event-stream',
           'Cache-Control': 'no-cache',
         },
+        credentials: 'include', // ⚠️ CRITICAL: Send httpOnly cookies
         signal: abortControllerRef.current.signal,
       })
         .then(async (response) => {
@@ -114,9 +112,13 @@ export function useGmailSSE(enabled: boolean = true) {
                   console.log(`[SSE] Event received: ${eventType}`, data);
 
                   if (data.type === 'gmail-updated') {
-                    // Invalidate React Query caches
+                    // Invalidate AND refetch React Query caches immediately
                     queryClient.invalidateQueries({ queryKey: ['mailboxes'] });
                     queryClient.invalidateQueries({ queryKey: ['emails'] });
+                    
+                    // Force immediate refetch to get latest data from server
+                    queryClient.refetchQueries({ queryKey: ['mailboxes'], type: 'active' });
+                    queryClient.refetchQueries({ queryKey: ['emails'], type: 'active' });
                     
                     toast.success('📬 New emails received', {
                       duration: 2000,
@@ -172,6 +174,7 @@ export function useGmailSSE(enabled: boolean = true) {
 
     // Cleanup on unmount
     return () => {
+      console.log('[SSE] 🧹 Cleaning up...');
       isMounted = false;
 
       if (abortControllerRef.current) {
@@ -186,7 +189,7 @@ export function useGmailSSE(enabled: boolean = true) {
 
       setIsConnected(false);
     };
-  }, [enabled, queryClient, reconnectAttempts]);
+  }, [enabled, queryClient]); // Remove reconnectAttempts from dependencies!
 
   return {
     isConnected,

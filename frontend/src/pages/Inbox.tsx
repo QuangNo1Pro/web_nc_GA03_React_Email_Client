@@ -1,4 +1,3 @@
-
 import React, {
   useState,
   useEffect,
@@ -35,6 +34,7 @@ import ComposeModal from '../components/ComposeModal';
 import { useComposeEmail } from '../hooks/useComposeEmail';
 import { useComposeHandlers } from '../hooks/useComposeHandlers';
 import { useEmailPagination } from '../hooks/useEmailPagination';
+import { useGmailSSE } from '../hooks/useGmailSSE';
 
 const FixedSizeList = (ReactWindow as any).FixedSizeList;
 
@@ -87,6 +87,14 @@ export default function Inbox() {
   const { user, logout } = useAuth();
   const { theme, toggleTheme } = useTheme();
   const [showProfileMenu, setShowProfileMenu] = useState(false);
+
+  // === Real-time email sync via SSE ===
+  const { isConnected: sseConnected } = useGmailSSE(true);
+  
+  // Debug SSE connection
+  useEffect(() => {
+    console.log('[Inbox] SSE connection status:', sseConnected);
+  }, [sseConnected]);
 
   const handleLogout = () => {
     logout();
@@ -244,6 +252,7 @@ export default function Inbox() {
   const {
     data: emailsRaw,
     isLoading: emailsLoading,
+    isFetching: emailsFetching,
     error: emailsError,
   } = useQuery({
     queryKey: ['emails', selectedMailbox],
@@ -1066,7 +1075,10 @@ export default function Inbox() {
     setComposeErrors,
     setIsSending,
     user,
-    onSendSuccess: () => handleRefresh(true),
+    onSendSuccess: async () => {
+      // Chỉ refresh dữ liệu, KHÔNG chuyển folder
+      await handleRefresh(true);
+    },
   });
 
   const getMailboxIcon = (mailbox: any) => {
@@ -1626,13 +1638,100 @@ export default function Inbox() {
           {/* ===== EMAIL LIST ===== */}
           <div className="flex flex-col h-full">
             <div ref={emailListRef} className="flex-1">
-              {emailsLoading ? (
-                <div className="center-spinner">
-                  <div className="spinner" />
+              {/* LOADING STATE: Show spinner when loading OR fetching without existing data */}
+              {emailsLoading || emailsFetching ? (
+                // If fetching with existing data, show email list + refetch indicator
+                // Otherwise show full loading spinner
+                (emailsFetching && emails && emails.length > 0) ? (
+                  // Background refetch - show list with indicator
+                  <div className="relative h-full">
+                    
+                    <EmailList
+                      ref={emailListComponentRef}
+                      emails={paginatedEmails}
+                      selectedEmail={selectedEmail}
+                      selectedEmails={selectedEmails}
+                      starredState={starredState}
+                      readState={readState}
+                      showCheckboxes={showCheckboxes}
+                      handleToggleCheckbox={handleToggleCheckbox}
+                      handleEmailSelect={handleEmailSelect}
+                      handleToggleRead={handleToggleRead}
+                      handleToggleStar={handleToggleStar}
+                      focusedEmailIndex={focusedEmailIndex}
+                      user={user}
+                      listHeight={listHeight}
+                    />
+                  </div>
+                ) : (
+                  // Initial load - show full spinner
+                  <div className="flex items-center justify-center h-full">
+                    <div className="text-center" style={{ color: 'var(--text-secondary)' }}>
+                      <div className="spinner" style={{ marginBottom: '16px' }} />
+                      <p style={{ fontSize: '14px', opacity: 0.7 }}>Đang tải email...</p>
+                    </div>
+                  </div>
+                )
+              ) : 
+              /* ERROR STATE: Only show when NOT loading/fetching and there's an actual error */
+              emailsError ? (
+                <div className="flex items-center justify-center h-full">
+                  <div className="text-center" style={{ color: 'var(--text-secondary)' }}>
+                    <div style={{ fontSize: '48px', marginBottom: '12px', opacity: 0.5 }}>
+                      <MaterialIcon name="error_outline" />
+                    </div>
+                    <p style={{ fontSize: '14px', fontWeight: 500 }}>Không thể tải email</p>
+                    <p style={{ fontSize: '12px', marginTop: '8px', opacity: 0.7 }}>
+                      Vui lòng thử lại sau
+                    </p>
+                  </div>
                 </div>
-              ) : emailsError ? (
-                <div>Error loading emails</div>
-              ) : (
+              ) : 
+              /* EMPTY MAILBOX: No emails at all after successful load */
+              !emails || emails.length === 0 ? (
+                <div className="flex items-center justify-center h-full">
+                  <div className="text-center" style={{ color: 'var(--text-secondary)' }}>
+                    <div style={{ fontSize: '64px', marginBottom: '16px', opacity: 0.3 }}>
+                      <MaterialIcon name={
+                        selectedMailbox === 'DRAFT' ? 'draft' :
+                        selectedMailbox === 'SENT' ? 'send' :
+                        selectedMailbox === 'TRASH' ? 'delete' :
+                        selectedMailbox === 'SPAM' ? 'report' :
+                        'inbox'
+                      } />
+                    </div>
+                    <p style={{ fontSize: '16px', fontWeight: 500 }}>
+                      Không có email nào trong {currentMailboxLabel}
+                    </p>
+                    <p style={{ fontSize: '13px', marginTop: '8px', opacity: 0.7 }}>
+                      {selectedMailbox === 'DRAFT' && 'Bắt đầu soạn thư nháp mới'}
+                      {selectedMailbox === 'SENT' && 'Chưa có email đã gửi'}
+                      {selectedMailbox === 'TRASH' && 'Thùng rác trống'}
+                      {selectedMailbox === 'SPAM' && 'Không có thư rác'}
+                      {selectedMailbox === 'INBOX' && 'Hộp thư đến trống'}
+                      {!['DRAFT', 'SENT', 'TRASH', 'SPAM', 'INBOX'].includes(selectedMailbox) && 'Thư mục trống'}
+                    </p>
+                  </div>
+                </div>
+              ) : 
+              /* FILTERED EMPTY: Has emails but filter/search returned nothing */
+              paginatedEmails.length === 0 ? (
+                <div className="flex items-center justify-center h-full">
+                  <div className="text-center" style={{ color: 'var(--text-secondary)' }}>
+                    <div style={{ fontSize: '64px', marginBottom: '16px', opacity: 0.3 }}>
+                      <MaterialIcon name="search" />
+                    </div>
+                    <p style={{ fontSize: '16px', fontWeight: 500 }}>
+                      Không tìm thấy email nào
+                    </p>
+                    <p style={{ fontSize: '13px', marginTop: '8px', opacity: 0.7 }}>
+                      Thử thay đổi bộ lọc hoặc từ khóa tìm kiếm
+                    </p>
+                  </div>
+                </div>
+              ) : 
+              /* SUCCESS STATE: Display email list */
+              (
                 <EmailList
                   ref={emailListComponentRef}
                   emails={paginatedEmails}
