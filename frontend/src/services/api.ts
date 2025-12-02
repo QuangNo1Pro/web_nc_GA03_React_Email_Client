@@ -22,18 +22,9 @@ const processQueue = (error: any, token = null) => {
   failedQueue = [];
 };
 
+// No need for request interceptor - HttpOnly cookies are sent automatically
 api.interceptors.request.use(
-  (config) => {
-    // Lấy token từ window hoặc localStorage
-    const token =
-      (window as any).__ACCESS_TOKEN__ ||
-      localStorage.getItem('access_token');
-    if (token) {
-      config.headers = config.headers || {};
-      config.headers['Authorization'] = `Bearer ${token}`;
-    }
-    return config;
-  },
+  (config) => config,
   (error) => Promise.reject(error)
 );
 

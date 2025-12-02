@@ -46,6 +46,7 @@ export class AuthController {
       httpOnly: true,
       secure: true,
       sameSite: isProduction ? 'none' : 'lax',
+      domain: isProduction ? undefined : undefined,
       path: '/',
       maxAge: 15 * 60 * 1000, // 15 minutes
     });
@@ -53,6 +54,7 @@ export class AuthController {
       httpOnly: true,
       secure: true,
       sameSite: isProduction ? 'none' : 'lax',
+      domain: isProduction ? undefined : undefined,
       path: '/',
       maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
     });
@@ -94,6 +96,7 @@ export class AuthController {
       httpOnly: true,
       secure: true,
       sameSite: isProduction ? 'none' : 'lax',
+      domain: isProduction ? undefined : undefined,
       path: '/',
       maxAge: 15 * 60 * 1000, // 15 minutes
     });
@@ -121,6 +124,7 @@ export class AuthController {
       httpOnly: true,
       secure: true,
       sameSite: isProduction ? 'none' : 'lax',
+      domain: isProduction ? undefined : undefined, // Let browser handle domain
       path: '/',
       maxAge: 15 * 60 * 1000, // 15 minutes
     });
@@ -128,10 +132,30 @@ export class AuthController {
       httpOnly: true,
       secure: true,
       sameSite: isProduction ? 'none' : 'lax',
+      domain: isProduction ? undefined : undefined, // Let browser handle domain
       path: '/',
       maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
     });
-    res.redirect(`${process.env.FRONTEND_URL}/inbox`);
+    
+    // Send HTML page that will do the redirect after ensuring cookies are set
+    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+    res.send(`
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <title>Redirecting...</title>
+        </head>
+        <body>
+          <p>Đang xử lý đăng nhập...</p>
+          <script>
+            // Wait a bit to ensure cookies are processed
+            setTimeout(() => {
+              window.location.href = '${frontendUrl}/inbox';
+            }, 100);
+          </script>
+        </body>
+      </html>
+    `);
   }
 
   @UseGuards(AuthGuard('jwt'))

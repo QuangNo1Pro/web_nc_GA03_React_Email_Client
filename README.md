@@ -162,5 +162,14 @@ VITE_API_URL=https://web-nc-ga03-react-email-client.onrender.com
 - Ứng dụng sử dụng `sameSite: 'none'` và `secure: true` cookies cho production
 - Điều này cho phép cookies hoạt động giữa Vercel (frontend) và Render (backend)
 - Cả hai domain phải sử dụng HTTPS
+- Cookies không được set với `domain` attribute để browser tự quản lý
+
+**Debug Cookies trên Production:**
+Nếu gặp lỗi 401 "Not authenticated" sau khi đăng nhập Google:
+1. Mở Developer Tools (F12) → Tab Application/Storage → Cookies
+2. Kiểm tra domain của backend (render.com) có cookies `access_token` và `refresh_token` không
+3. Đảm bảo cookies có attributes: `HttpOnly`, `Secure`, `SameSite=None`
+4. Xóa tất cả cookies và thử đăng nhập lại
+5. Kiểm tra Console logs có lỗi CORS không
 
 **Lưu ý:** Backend đã triển khai có các biến môi trường cần thiết cho thông tin xác thực Google.
