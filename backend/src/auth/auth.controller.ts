@@ -48,7 +48,7 @@ export class AuthController {
       sameSite: isProduction ? 'none' : 'lax',
       domain: isProduction ? undefined : undefined,
       path: '/',
-      maxAge: 15 * 60 * 1000, // 15 minutes
+      maxAge: 30 * 1000, // 🧪 TEST: 30 seconds (change back to 15 * 60 * 1000)
     });
     res.cookie('refresh_token', tokens.refresh_token, {
       httpOnly: true,
@@ -56,7 +56,7 @@ export class AuthController {
       sameSite: isProduction ? 'none' : 'lax',
       domain: isProduction ? undefined : undefined,
       path: '/',
-      maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
+      maxAge: 2 * 60 * 1000, // 🧪 TEST: 2 minutes (change back to 7 * 24 * 60 * 60 * 1000)
     });
     return {
       status: 'success',
@@ -98,7 +98,7 @@ export class AuthController {
       sameSite: isProduction ? 'none' : 'lax',
       domain: isProduction ? undefined : undefined,
       path: '/',
-      maxAge: 15 * 60 * 1000, // 15 minutes
+      maxAge: 30 * 1000, // 🧪 TEST: 30 seconds (change back to 15 * 60 * 1000)
     });
     return {
       status: 'success',

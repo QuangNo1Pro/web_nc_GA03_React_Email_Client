@@ -26,7 +26,18 @@ export class JwtStrategy extends PassportStrategy(Strategy, 'jwt') {
 
   async validate(payload: any) {
     const user = await this.usersService.findById(payload.sub);
-    if (!user) return null;
+    if (!user) {
+      console.log('❌ [JWT] Token validation failed: User not found');
+      return null;
+    }
+    
+    const now = Math.floor(Date.now() / 1000);
+    const timeLeft = payload.exp - now;
+    
+    if (timeLeft < 10) {
+      console.log('⚠️ [JWT] Token expiring soon for user:', user.email, `(${timeLeft}s left)`);
+    }
+    
     return {
       userId: user._id.toString(),
       email: user.email,
