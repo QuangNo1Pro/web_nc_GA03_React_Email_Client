@@ -132,10 +132,10 @@ const EmailDetail: React.FC<EmailDetailProps> = ({
             </div>
 
             {/* Right: Action Buttons */}
-            <div className="flex items-center gap-1 flex-shrink flex-[0.7]">
+            <div className="flex items-center gap-1 flex-shrink flex-[0.7] ">
               <button
                 onClick={handleReply}
-                className="p-2.5 rounded-lg transition-all"
+                className="p-2.5 rounded-lg transition-all -translate-y-[10px]"
                 title="Trả lời"
                 onMouseEnter={(e) => {
                   e.currentTarget.style.backgroundColor = 'var(--bg-hover)';
@@ -147,12 +147,12 @@ const EmailDetail: React.FC<EmailDetailProps> = ({
                 }}
               >
                 <ArrowReply20Regular
-                  style={{ color: isReplyHoveredDetail ? 'var(--accent-primary)' : 'var(--text-secondary)' }}
+                  style={{ color: isReplyHoveredDetail ? 'var(--accent-primary)' : 'var(--text-secondary)'  }}
                 />
               </button>
               <button
                 onClick={handleReplyAll}
-                className="p-2.5 rounded-lg transition-all"
+                className="p-2.5 rounded-lg transition-all -translate-y-[10px]"
                 title="Trả lời tất cả"
                 onMouseEnter={(e) => {
                   e.currentTarget.style.backgroundColor = 'var(--bg-hover)';
@@ -169,7 +169,7 @@ const EmailDetail: React.FC<EmailDetailProps> = ({
               </button>
               <button
                 onClick={handleForward}
-                className="p-2.5 rounded-lg transition-all"
+                className="p-2.5 rounded-lg transition-all -translate-y-[10px]"
                 title="Chuyển tiếp"
                 onMouseEnter={(e) => {
                   e.currentTarget.style.backgroundColor = 'var(--bg-hover)';
@@ -185,12 +185,12 @@ const EmailDetail: React.FC<EmailDetailProps> = ({
                 />
               </button>
               <div
-                className="h-6 w-px mx-1"
+                className="h-6 w-px mx-1 -translate-y-[10px]"
                 style={{ backgroundColor: 'var(--border-primary)' }}
               />
               <button
                 onClick={() => handleToggleRead(email.id)}
-                className="p-2.5 rounded-lg transition-all"
+                className="p-2.5 rounded-lg transition-all -translate-y-[10px]"
                 title={email.read ? 'Đánh dấu chưa đọc' : 'Đánh dấu đã đọc'}
                 onMouseEnter={(e) => {
                   e.currentTarget.style.backgroundColor = 'var(--bg-hover)';
@@ -213,7 +213,7 @@ const EmailDetail: React.FC<EmailDetailProps> = ({
               </button>
               <button
                 onClick={() => handleToggleStar(email.id)}
-                className="p-2.5 rounded-lg transition-all"
+                className="p-2.5 rounded-lg transition-all -translate-y-[10px]"
                 title={starredState[email.id] ? 'Bỏ gắn sao' : 'Gắn sao'}
                 onMouseEnter={(e) => {
                   e.currentTarget.style.backgroundColor = 'var(--bg-hover)';
@@ -232,7 +232,7 @@ const EmailDetail: React.FC<EmailDetailProps> = ({
               </button>
               <button
                 onClick={() => handleDeleteEmail(email.id)}
-                className="p-2.5 rounded-lg transition-all"
+                className="p-2.5 rounded-lg transition-all -translate-y-[10px]"
                 title="Xóa"
                 onMouseEnter={(e) => {
                   e.currentTarget.style.backgroundColor = 'var(--bg-hover)';
