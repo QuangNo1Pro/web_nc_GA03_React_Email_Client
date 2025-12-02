@@ -1,291 +1,218 @@
-import React, { useState, useEffect, useRef } from 'react';
+
+import React, {
+  useState,
+  useEffect,
+  useRef,
+  useMemo,
+} from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
 import * as ReactWindow from 'react-window';
 import { api } from '../services/api';
-import './Inbox.css';
+import {
+  fetchMailboxes,
+  fetchEmails,
+  fetchEmail,
+  patchEmailStar,
+  patchEmailRead,
+  patchBulkRead,
+  patchEmailSpam,
+  deleteEmail,
+  patchEmailArchive,
+  postEmailMove,
+  postGmailRefresh,
+  postSendEmail,
+  getAttachment,
+  saveDraft,
+} from '../services/emailService';
+import MaterialIcon from '../components/MaterialIcon';
+import MailboxList from '../components/MailboxList';
+import EmailRow from '../components/EmailRow';
+import EmailList, { EmailListHandle } from '../components/EmailList';
+import { useAuth } from "../auth/AuthContext";
+import { useTheme } from '../contexts/ThemeContext';
+import ComposeModal from '../components/ComposeModal';
+import { useComposeEmail } from '../hooks/useComposeEmail';
+import { useComposeHandlers } from '../hooks/useComposeHandlers';
+import { useEmailPagination } from '../hooks/useEmailPagination';
 
 const FixedSizeList = (ReactWindow as any).FixedSizeList;
+
+import EmailDetail from '../components/EmailDetail';
+import ConfirmDialog from '../components/ConfirmDialog';
+
 import {
-  FiInbox,
-  FiSend,
-  FiFileText,
-  FiEdit,
-  FiRefreshCw,
-  FiMoreVertical,
-  FiFolder,
-  FiTrash2,
-} from 'react-icons/fi';
-import { FaRegStar, FaStar } from 'react-icons/fa';
-import { LuMail, LuMailOpen, LuMails } from 'react-icons/lu';
-import { TbMailFilled, TbMailOpenedFilled } from 'react-icons/tb';
+  mailboxLabelVN,
+  getMailboxLabelVN,
+  b64toBlob,
+  parseAttachments,
+  getAvatarColor,
+  extractEmails,
+  parseEmail,
+} from '../utils/emailUtils';
+
+// ...existing code...
+
+// ===== ICON MAP =====
+// Đảm bảo các icon được import đúng
 import { IoIosArrowDown } from 'react-icons/io';
-import { 
-  ArrowReply20Regular, 
-  ArrowReplyAll20Regular, 
-  ArrowForward20Regular,
-  FolderArrowRight20Regular
-} from '@fluentui/react-icons';
 
-const mailboxIcons: { [key: string]: JSX.Element } = {
-  inbox: <FiInbox />,
-  starred: <FaRegStar />,
-  sent: <FiSend />,
-  drafts: <FiFileText />,
-  spam: <FiFolder />,
-  all_mail: <FolderArrowRight20Regular />, // Add icon for archive
-  default: <FiFolder />,
+const mailboxIcons: Record<string, JSX.Element> = {
+  INBOX: <MaterialIcon name="inbox" />,
+  STARRED: <MaterialIcon name="star" />,
+  SENT: <MaterialIcon name="send" />,
+  IMPORTANT: <MaterialIcon name="label_important" />,
+  DRAFT: <MaterialIcon name="draft" />,
+  SPAM: <MaterialIcon name="report" />,
+  TRASH: <MaterialIcon name="delete" />,
+  UNREAD: <MaterialIcon name="mark_email_unread" />,
+  CHAT: <MaterialIcon name="chat" />,
+  default: <MaterialIcon name="mail" />,
 };
 
-const fetchMailboxes = async () => {
-  const { data } = await api.get('/gmail/mailboxes');
-  return data;
-};
-
-const fetchEmails = async (mailboxId: string) => {
-  const { data } = await api.get(`/gmail/mailboxes/${mailboxId}/emails`);
-  return data; // Gmail API returns { messages, nextPageToken, resultSizeEstimate }
-};
-
-const fetchEmail = async (emailId: string) => {
-  const { data } = await api.get(`/gmail/emails/${emailId}`);
-  return data;
-};
-
-const parseEmail = (email: any) => {
-  const headers = email.payload.headers;
-  const fromHeader = headers.find((h: any) => h.name === 'From')?.value || '';
-  const subjectHeader =
-    headers.find((h: any) => h.name === 'Subject')?.value || '';
-  const dateHeader = headers.find((h: any) => h.name === 'Date')?.value || '';
-
-  const sender = fromHeader.replace(/<.*>/, '').trim();
-  const subject = subjectHeader;
-  const timestamp = new Date(dateHeader).toISOString();
-  const starred = email.labelIds.includes('STARRED');
-  const read = !email.labelIds.includes('UNREAD');
-  const preview = email.snippet;
-
-  return {
-    id: email.id,
-    sender,
-    subject,
-    timestamp,
-    starred,
-    read,
-    preview,
-  };
-};
-
-// Helper to convert base64 to a Blob
-const b64toBlob = (b64Data: string, contentType = '', sliceSize = 512) => {
-  const byteCharacters = atob(b64Data);
-  const byteArrays = [];
-
-  for (let offset = 0; offset < byteCharacters.length; offset += sliceSize) {
-    const slice = byteCharacters.slice(offset, offset + sliceSize);
-
-    const byteNumbers = new Array(slice.length);
-    for (let i = 0; i < slice.length; i++) {
-      byteNumbers[i] = slice.charCodeAt(i);
-    }
-
-    const byteArray = new Uint8Array(byteNumbers);
-    byteArrays.push(byteArray);
-  }
-
-  const blob = new Blob(byteArrays, { type: contentType });
-  return blob;
-};
-
-// Helper to recursively parse attachments from email payload
-const parseAttachments = (parts: any[]): any[] => {
-  let attachments: any[] = [];
-  if (!parts) {
-    return attachments;
-  }
-
-  parts.forEach(part => {
-    if (part.parts) {
-      attachments = attachments.concat(parseAttachments(part.parts));
-    }
-    if (part.filename && part.body?.attachmentId) {
-      attachments.push({
-        attachmentId: part.body.attachmentId,
-        filename: part.filename,
-        mimeType: part.mimeType,
-        size: part.body.size,
-      });
-    }
-  });
-  return attachments;
-};
-
-// Helper function to get consistent color for avatar based on sender name
-const getAvatarColor = (name: string) => {
-  const colors = [
-    'bg-blue-500',
-    'bg-green-500', 
-    'bg-yellow-500',
-    'bg-red-500',
-    'bg-purple-500',
-    'bg-pink-500',
-    'bg-indigo-500',
-    'bg-teal-500',
-    'bg-orange-500',
-    'bg-cyan-500'
-  ];
-  
-  // Generate consistent hash from name
-  let hash = 0;
-  for (let i = 0; i < name.length; i++) {
-    hash = name.charCodeAt(i) + ((hash << 5) - hash);
-  }
-  
-  return colors[Math.abs(hash) % colors.length];
-};
-
-// EmailRow component cho virtualized list
-const EmailRow = ({ index, style, data }: any) => {
-  const {
-    emails,
-    selectedEmail,
-    selectedMailbox,
-    selectedEmails,
-    starredState,
-    focusedEmailIndex,
-    showCheckboxes,
-    handleToggleCheckbox,
-    handleEmailSelect,
-    handleToggleRead,
-    handleToggleStar,
-    handleDeleteEmail,
-  } = data;
-
-  const email = emails[index];
-  if (!email) return null;
-
-  const isFocused = index === focusedEmailIndex;
-
-  return (
-    <div
-      style={style}
-      role="button"
-      tabIndex={isFocused ? 0 : -1}
-      aria-label={`Email from ${email.sender}: ${email.subject}`}
-      className={`flex items-start p-3 cursor-pointer hover:bg-gray-100 border-b ${
-        selectedEmail === email.id ? 'bg-blue-50' : ''
-      } ${isFocused ? 'ring-2 ring-blue-400' : ''} ${!email.read ? 'border-l-4 border-l-blue-500' : 'border-l-4 border-l-transparent'}`}
-    >
-      {/* Avatar container với checkbox */}
-      <div className="relative mr-3 flex-shrink-0">
-        {showCheckboxes || selectedEmail === email.id ? (
-          <div className="w-10 h-10 flex items-center justify-center">
-            <input
-              type="checkbox"
-              className="w-4 h-4 cursor-pointer"
-              checked={selectedEmails.has(email.id)}
-              onChange={(e) => {
-                e.stopPropagation();
-                handleToggleCheckbox(email.id);
-              }}
-              onClick={(e) => e.stopPropagation()}
-              aria-label={selectedEmails.has(email.id) ? `Bỏ chọn email từ ${email.sender} với chủ đề ${email.subject}` : `Chọn email từ ${email.sender} với chủ đề ${email.subject}`}
-            />
-          </div>
-        ) : (
-          <div className={`w-10 h-10 rounded-full flex items-center justify-center font-bold text-white ${getAvatarColor(email.sender)}`}>
-            {email.sender.charAt(0).toUpperCase()}
-          </div>
-        )}
-      </div>
-      
-      <div className="flex-grow min-w-0" onClick={() => handleEmailSelect(email.id)}>
-        {/* Hàng đầu tiên: tên người gửi + action icons */}
-        <div className="flex justify-between items-center mb-1 gap-2">
-          <span className={`email-sender truncate ${!email.read ? 'font-semibold' : 'font-normal'}`}>{email.sender}</span>
-          <span className="flex items-center gap-3 flex-shrink-0">
-            {/* Icon sao */}
-            <button
-              className="opacity-60 hover:opacity-100 transition-opacity p-0.5"
-              title={starredState[email.id] ? 'Bỏ gắn sao' : 'Gắn sao'}
-              onClick={e => {
-                e.stopPropagation();
-                handleToggleStar(email.id);
-              }}
-            >
-              {starredState[email.id] ? (
-                <FaStar className="text-yellow-400 hover:text-yellow-500" size={16} />
-              ) : (
-                <FaRegStar className="text-gray-500 hover:text-yellow-400" size={16} />
-              )}
-            </button>
-            {/* Icon đánh dấu đã đọc/chưa đọc */}
-            <button
-              className="opacity-60 hover:opacity-100 transition-opacity p-0.5"
-              title={email.read ? 'Đánh dấu chưa đọc' : 'Đánh dấu đã đọc'}
-              onClick={e => {
-                e.stopPropagation();
-                handleToggleRead(email.id);
-              }}
-            >
-              {email.read ? (
-                <LuMail className="text-gray-500 hover:text-gray-700" size={16} />
-              ) : (
-                <LuMailOpen className="text-blue-500 hover:text-blue-600" size={16} />
-              )}
-            </button>
-
-          </span>
-        </div>
-        {/* Hàng thứ hai: subject + timestamp */}
-        <div className="flex justify-between items-center mb-1 gap-2">
-          <span className={`email-subject truncate flex-1 ${!email.read ? 'font-semibold' : 'font-normal'}`}>{email.subject}</span>
-          <span className="email-timestamp text-xs text-gray-500 flex-shrink-0">
-            {(() => {
-              const date = new Date(email.timestamp);
-              const weekday = date.toLocaleString('vi-VN', { weekday: 'short' }).replace(/^\w/, c => c.toUpperCase());
-              const time = date.toLocaleString('vi-VN', { hour: 'numeric', minute: '2-digit', hour12: true });
-              return `${weekday} ${time}`;
-            })()}
-          </span>
-        </div>
-        {/* Hàng thứ ba: preview */}
-        <div className="email-preview truncate text-sm text-gray-600">{email.preview}</div>
-      </div>
-    </div>
-  );
-};
+// ...existing code...
 
 export default function Inbox() {
+  // State for Mark as Read button hover
+  const [isMarkHovered, setIsMarkHovered] = useState(false);
   const queryClient = useQueryClient();
-  const [selectedMailbox, setSelectedMailbox] = useState('inbox');
+  const emailListComponentRef = useRef<EmailListHandle>(null);
+
+  // Store ref globally for access in handlers
+  useEffect(() => {
+    (window as any).__EMAIL_LIST_REF__ = emailListComponentRef.current;
+  }, [emailListComponentRef.current]);
+
+  // === Profile menu + Auth ===
+  const { user, logout } = useAuth();
+  const { theme, toggleTheme } = useTheme();
+  const [showProfileMenu, setShowProfileMenu] = useState(false);
+
+  const handleLogout = () => {
+    logout();
+  };
+
+
+  // 👉 Init INBOX cho đúng id Gmail
+  const [searchQuery, setSearchQuery] = useState("");
+
+
+  const [selectedMailbox, setSelectedMailbox] = useState('INBOX');
   const [selectedEmail, setSelectedEmail] = useState<string | null>(null);
-  const [mobileView, setMobileView] = useState('emails'); // emails or email (default: emails)
-  const [starredState, setStarredState] = useState<{ [id: string]: boolean }>({});
-  const [selectedEmails, setSelectedEmails] = useState<Set<string>>(new Set());
-  const [showCheckboxes, setShowCheckboxes] = useState(false); // Hiển thị checkbox khi user tick vào 1 checkbox
-  const [mailboxWidth, setMailboxWidth] = useState(20); // % width
-  const [emailListWidth, setEmailListWidth] = useState(40); // % width
-  const [showComposeModal, setShowComposeModal] = useState(false);
-  const [composeTo, setComposeTo] = useState('');
-  const [composeCc, setComposeCc] = useState('');
-  const [composeBcc, setComposeBcc] = useState('');
-  const [composeSubject, setComposeSubject] = useState('');
-  const [composeBody, setComposeBody] = useState('');
-  const [composeAttachments, setComposeAttachments] = useState<File[]>([]);
-  const [showCc, setShowCc] = useState(false);
-  const [showBcc, setShowBcc] = useState(false);
+  const [mobileView, setMobileView] = useState<'emails' | 'email'>('emails');
+
+  const [starredState, setStarredState] = useState<{ [id: string]: boolean }>(
+    {},
+  );
+  const [readState, setReadState] = useState<{ [id: string]: boolean }>(
+    {},
+  );
+  const [selectedEmails, setSelectedEmails] = useState<Set<string>>(
+    new Set(),
+  );
+
+  const [showCheckboxes, setShowCheckboxes] = useState(false);
+
+  const [mailboxWidth, setMailboxWidth] = useState(20);
+  const [emailListWidth, setEmailListWidth] = useState(40);
+
+  // Compose email state & logic
+  const {
+    showComposeModal,
+    setShowComposeModal,
+    composeTo,
+    setComposeTo,
+    composeCc,
+    setComposeCc,
+    composeBcc,
+    setComposeBcc,
+    composeSubject,
+    setComposeSubject,
+    composeBody,
+    setComposeBody,
+    composeAttachments,
+    setComposeAttachments,
+    showCc,
+    setShowCc,
+    showBcc,
+    setShowBcc,
+    composeErrors,
+    setComposeErrors,
+    isSending,
+    setIsSending
+  } = useComposeEmail();
+
+  // Hàm đóng compose và lưu nháp nếu chưa gửi
+  const handleCloseCompose = async () => {
+    // Nếu chưa gửi, có subject/body hoặc file thì lưu nháp
+    const hasContent = composeSubject.trim() || composeBody.trim() || composeAttachments.length > 0;
+    const notSent = !isSending && (hasContent || composeTo.trim() || composeCc.trim() || composeBcc.trim());
+    if (notSent) {
+      try {
+        // Convert files to base64 for draft
+        const attachmentsBase64 = await Promise.all(
+          composeAttachments.map(async (file) => {
+            const base64 = await new Promise<string>((resolve) => {
+              const reader = new FileReader();
+              reader.onloadend = () => {
+                const result = reader.result as string;
+                resolve(result.split(',')[1]);
+              };
+              reader.readAsDataURL(file);
+            });
+            return { filename: file.name, mimeType: file.type, base64Content: base64 };
+          })
+        );
+        
+        await saveDraft({
+          to: composeTo,
+          cc: composeCc,
+          bcc: composeBcc,
+          subject: composeSubject,
+          body: composeBody,
+          attachments: attachmentsBase64,
+        });
+        
+        // Refresh draft mailbox to show new draft
+        queryClient.invalidateQueries({ queryKey: ['emails', 'DRAFT'] });
+        queryClient.invalidateQueries({ queryKey: ['mailboxes'] });
+        
+        toast.success('Đã lưu vào thư nháp');
+      } catch (err) {
+        console.error('Save draft error:', err);
+        toast.error('Lưu nháp thất bại');
+      }
+    }
+    setShowComposeModal(false);
+    setComposeTo('');
+    setComposeCc('');
+    setComposeBcc('');
+    setComposeSubject('');
+    setComposeBody('');
+    setComposeAttachments([]);
+    setShowCc(false);
+    setShowBcc(false);
+    setComposeErrors({});
+  };
+  <button onClick={handleCloseCompose} className="text-gray-500 hover:text-gray-700">✕</button>
+
   const [showMoreMenu, setShowMoreMenu] = useState(false);
   const [focusedEmailIndex, setFocusedEmailIndex] = useState(0);
   const [showKeyboardHelp, setShowKeyboardHelp] = useState(false);
   const [showMailboxMenu, setShowMailboxMenu] = useState(false);
   const [showMoveToMenu, setShowMoveToMenu] = useState(false);
-  const [showReadFilterMenu, setShowReadFilterMenu] = useState(false);
-  const [readFilter, setReadFilter] = useState<'all' | 'read' | 'unread'>('all');
-  const [downloadingAttachments, setDownloadingAttachments] = useState<Set<string>>(new Set());
+  const [showReadFilterMenu] = useState(false);
+  const [readFilter, setReadFilter] = useState<'all' | 'read' | 'unread'>(
+    'all',
+  );
+
+  const [downloadingAttachments, setDownloadingAttachments] = useState<
+    Set<string>
+  >(new Set());
+
   const emailListRef = useRef<HTMLDivElement>(null);
   const [listHeight, setListHeight] = useState(500);
+
   const [isMailHoveredDetail, setIsMailHoveredDetail] = useState(false);
   const [isStarHoveredDetail, setIsStarHoveredDetail] = useState(false);
   const [isRefreshHovered, setIsRefreshHovered] = useState(false);
@@ -293,10 +220,17 @@ export default function Inbox() {
   const [isReplyAllHovered, setIsReplyAllHovered] = useState(false);
   const [isForwardHovered, setIsForwardHovered] = useState(false);
   const [isReplyHoveredDetail, setIsReplyHoveredDetail] = useState(false);
-  const [isReplyAllHoveredDetail, setIsReplyAllHoveredDetail] = useState(false);
-  const [isForwardHoveredDetail, setIsForwardHoveredDetail] = useState(false);
-  const [isArchiveHoveredDetail, setIsArchiveHoveredDetail] = useState(false);
-  const [isDeleteHoveredDetail, setIsDeleteHoveredDetail] = useState(false);
+  const [isReplyAllHoveredDetail, setIsReplyAllHoveredDetail] =
+    useState(false);
+  const [isForwardHoveredDetail, setIsForwardHoveredDetail] =
+    useState(false);
+  const [isArchiveHoveredDetail, setIsArchiveHoveredDetail] =
+    useState(false);
+  const [isDeleteHoveredDetail, setIsDeleteHoveredDetail] =
+    useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [emailToDelete, setEmailToDelete] = useState<string | null>(null);
+
 
   const {
     data: mailboxes,
@@ -308,68 +242,105 @@ export default function Inbox() {
   });
 
   const {
-    data: emails,
+    data: emailsRaw,
     isLoading: emailsLoading,
     error: emailsError,
   } = useQuery({
     queryKey: ['emails', selectedMailbox],
     queryFn: () => fetchEmails(selectedMailbox),
     enabled: !!selectedMailbox,
+    staleTime: 5 * 60 * 1000, // 5 minutes - prevent auto-refetch
     select: (data) => {
       const parsedEmails = data.messages.map(parseEmail);
       if (selectedMailbox === 'ALL_MAIL') {
-        return parsedEmails.filter((email: any) => !email.labelIds.includes('INBOX'));
+        // loại INBOX nếu cần
+        return parsedEmails.filter(
+          (email: any) => !email.labelIds?.includes('INBOX'),
+        );
       }
       return parsedEmails;
     },
   });
+
+  // Merge readState overrides into emails, exactly like starredState
+  const emails = useMemo(() => {
+    if (!emailsRaw) return [];
+    return emailsRaw.map((email: any) => ({
+      ...email,
+      read: readState[email.id] !== undefined ? readState[email.id] : email.read,
+    }));
+  }, [emailsRaw, readState]);
 
   const {
     data: emailDetail,
     isLoading: emailLoading,
     error: emailError,
   } = useQuery({
-    queryKey: ['email', selectedEmail],
-    queryFn: () => fetchEmail(selectedEmail!),
+    queryKey: ['email', selectedEmail ?? undefined],
+    queryFn: () => selectedEmail ? fetchEmail(selectedEmail) : Promise.resolve(undefined),
     enabled: !!selectedEmail,
   });
 
-  // Lấy email từ list để có read/starred state mới nhất
-  const email = selectedEmail 
-    ? (() => {
-        const listEmail = emails?.find((e: any) => e.id === selectedEmail);
-        if (!emailDetail) return listEmail || null;
-        
-        // Ưu tiên read/starred từ list (đã được update optimistically)
-        return {
-          ...emailDetail,
-          ...(listEmail || {}),
-          // Giữ lại body/attachments/cc từ detail (list không có)
-          body: emailDetail?.body || '',
-          attachments: parseAttachments(emailDetail?.payload?.parts),
-          // Extract more details from headers if needed
-          from: emailDetail?.headers.From,
-          to: emailDetail?.headers.To,
-          cc: emailDetail?.headers.Cc,
-          bcc: emailDetail?.headers.Bcc,
-          subject: emailDetail?.headers.Subject,
-          received: emailDetail?.headers.Date,
-        };
-      })()
-    : null;
+  // Sử dụng hook useEmailPagination cho filter và phân trang
+  const {
+    filteredEmails,
+    paginatedEmails,
+    currentPage,
+    setCurrentPage,
+    pageSize,
+    startIndex,
+    totalPages,
+    safeCurrentPage,
+  } = useEmailPagination(
+    emails,
+    searchQuery,
+    selectedMailbox,
+    starredState,
+    readFilter,
+    20
+  );
 
-  const handleDownloadAttachment = async (messageId: string, attachment: any) => {
+  // Email đang xem (detail) - merge readState override for consistent UI
+  const email =
+    selectedEmail &&
+    (() => {
+      const listEmail = emails?.find((e: any) => e.id === selectedEmail);
+      if (!emailDetail) return listEmail || null;
+
+      return {
+        ...emailDetail,
+        ...(listEmail || {}),
+        body: emailDetail?.body || '',
+        attachments: parseAttachments(emailDetail?.payload?.parts),
+        from: emailDetail?.headers?.From,
+        to: emailDetail?.headers?.To,
+        cc: emailDetail?.headers?.Cc,
+        bcc: emailDetail?.headers?.Bcc,
+        subject: emailDetail?.headers?.Subject,
+        received: emailDetail?.headers?.Date,
+        // Override read state from readState for instant UI update
+        read: readState[selectedEmail] !== undefined ? readState[selectedEmail] : emailDetail?.read,
+      };
+    })();
+
+  const handleDownloadAttachment = async (
+    messageId: string,
+    attachment: any,
+  ) => {
     if (downloadingAttachments.has(attachment.attachmentId)) return;
 
-    setDownloadingAttachments(prev => new Set(prev).add(attachment.attachmentId));
-    const toastId = toast.loading(`Đang tải xuống ${attachment.filename}...`);
+    setDownloadingAttachments((prev) =>
+      new Set(prev).add(attachment.attachmentId),
+    );
+    const toastId = toast.loading(
+      `Đang tải xuống ${attachment.filename}...`,
+    );
 
     try {
       const { data } = await api.get(
         `/gmail/attachments/${messageId}/${attachment.attachmentId}`,
       );
 
-      // The Gmail API returns base64url encoded data, which needs to be converted to standard base64
       const b64 = data.data.replace(/-/g, '+').replace(/_/g, '/');
       const blob = b64toBlob(b64, attachment.mimeType);
       const url = window.URL.createObjectURL(blob);
@@ -380,13 +351,13 @@ export default function Inbox() {
       link.click();
       link.parentNode?.removeChild(link);
       window.URL.revokeObjectURL(url);
-      
+
       toast.success('Tải xuống thành công!', { id: toastId });
     } catch (err) {
       console.error('Download error:', err);
       toast.error('Lỗi khi tải xuống tệp!', { id: toastId });
     } finally {
-      setDownloadingAttachments(prev => {
+      setDownloadingAttachments((prev) => {
         const newSet = new Set(prev);
         newSet.delete(attachment.attachmentId);
         return newSet;
@@ -398,39 +369,35 @@ export default function Inbox() {
     setSelectedMailbox(mailboxId);
     setSelectedEmail(null);
     setMobileView('emails');
-    setStarredState({}); // reset starred state when switching mailbox
-    setSelectedEmails(new Set()); // reset selected emails when switching mailbox
-    setShowCheckboxes(false); // reset checkbox mode when switching mailbox
-    setFocusedEmailIndex(0); // reset focus to first email
-    // Refresh mailboxes to update unread counts
+    setStarredState({});
+    setReadState({});
+    setSelectedEmails(new Set());
+    setShowCheckboxes(false);
+    setFocusedEmailIndex(0);
+    setCurrentPage(1); // reset về page 1 khi đổi mailbox
     queryClient.invalidateQueries({ queryKey: ['mailboxes'] });
   };
 
-  // Keyboard navigation
+  // Keyboard navigation (trên trang hiện tại)
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (!emails || emails.length === 0) return;
-      
-      const filteredEmails = emails.filter((email: any) => {
-        if (selectedMailbox === 'starred') return starredState[email.id];
-        return true;
-      });
-      
-      if (filteredEmails.length === 0) return;
+      if (!paginatedEmails || paginatedEmails.length === 0) return;
 
       switch (e.key) {
         case 'ArrowDown':
           e.preventDefault();
-          setFocusedEmailIndex(prev => Math.min(prev + 1, filteredEmails.length - 1));
+          setFocusedEmailIndex((prev) =>
+            Math.min(prev + 1, paginatedEmails.length - 1),
+          );
           break;
         case 'ArrowUp':
           e.preventDefault();
-          setFocusedEmailIndex(prev => Math.max(prev - 1, 0));
+          setFocusedEmailIndex((prev) => Math.max(prev - 1, 0));
           break;
         case 'Enter':
           e.preventDefault();
-          if (filteredEmails[focusedEmailIndex]) {
-            handleEmailSelect(filteredEmails[focusedEmailIndex].id);
+          if (paginatedEmails[focusedEmailIndex]) {
+            handleEmailSelect(paginatedEmails[focusedEmailIndex].id);
           }
           break;
         case 'r':
@@ -480,198 +447,248 @@ export default function Inbox() {
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [emails, selectedMailbox, starredState, focusedEmailIndex, selectedEmail, showComposeModal]);
+  }, [
+    paginatedEmails,
+    focusedEmailIndex,
+    selectedEmail,
+    showComposeModal,
+    showKeyboardHelp,
+    showMailboxMenu,
+  ]);
 
-  // Update list height when container size changes
+  // update height list khi resize
   useEffect(() => {
     const updateHeight = () => {
       if (emailListRef.current) {
         setListHeight(emailListRef.current.clientHeight);
       }
     };
-    
+
     updateHeight();
     window.addEventListener('resize', updateHeight);
     return () => window.removeEventListener('resize', updateHeight);
   }, []);
 
-  // Debug: Log mailboxes data
   useEffect(() => {
     if (mailboxes) {
       console.log('Mailboxes data:', mailboxes);
     }
   }, [mailboxes]);
 
-  // Khi fetch emails, cập nhật trạng thái starred từ dữ liệu backend
+  // sync starredState and readState
   useEffect(() => {
-    if (emails) {
+    if (!emailsRaw) return;
+    // Only update starredState if emails array actually changed
+    setStarredState((prev) => {
       const newState: { [id: string]: boolean } = {};
-      emails.forEach((email: any) => {
-        newState[email.id] = email.starred;
+      emailsRaw.forEach((email: any) => {
+        newState[email.id] = !!email.starred;
       });
-      setStarredState(newState);
-    }
-  }, [emails]);
+      // Only update if different
+      const isSame = Object.keys(newState).length === Object.keys(prev).length && Object.keys(newState).every((id) => newState[id] === prev[id]);
+      return isSame ? prev : newState;
+    });
+    // Sync readState from emailsRaw
+    setReadState((prev) => {
+      const newState: { [id: string]: boolean } = {};
+      emailsRaw.forEach((email: any) => {
+        newState[email.id] = !!email.read;
+      });
+      // Only update if different
+      const isSame = Object.keys(newState).length === Object.keys(prev).length && Object.keys(newState).every((id) => newState[id] === prev[id]);
+      return isSame ? prev : newState;
+    });
+  }, [emailsRaw]);
 
-  // Hàm toggle starred cho email, đồng bộ với backend
+  // khi đổi filter / mailbox / page → reset focus về dòng đầu
+  useEffect(() => {
+    setFocusedEmailIndex(0);
+  }, [selectedMailbox, readFilter, currentPage]);
+
   const handleToggleStar = async (emailId: string) => {
     const newStarred = !starredState[emailId];
-    console.log(`Toggle star for email ${emailId}: ${starredState[emailId]} -> ${newStarred}`);
-    
+    console.log(
+      `Toggle star for email ${emailId}: ${starredState[emailId]} -> ${newStarred}`,
+    );
+
     setStarredState((prev) => ({
       ...prev,
       [emailId]: newStarred,
     }));
-    
-    // Optimistic update: cập nhật TẤT CẢ cache liên quan
+
+    // data của query ['emails', selectedMailbox] là array emails (do select đã map)
     queryClient.setQueryData(['emails', selectedMailbox], (oldData: any) => {
       if (!Array.isArray(oldData)) return oldData;
-      return oldData.map((e: any) => 
-        e.id === emailId ? { ...e, starred: newStarred } : e
+      return oldData.map((e: any) =>
+        e.id === emailId ? { ...e, starred: newStarred } : e,
       );
     });
-    
-    // Update cache của starred mailbox luôn
+
     queryClient.setQueryData(['emails', 'starred'], (oldData: any) => {
       if (!Array.isArray(oldData)) return oldData;
-      return oldData.map((e: any) => 
-        e.id === emailId ? { ...e, starred: newStarred } : e
+      return oldData.map((e: any) =>
+        e.id === emailId ? { ...e, starred: newStarred } : e,
       );
     });
-    
+
     try {
-      await api.patch(`/gmail/emails/${emailId}/star`, { starred: newStarred });
-      // Invalidate TẤT CẢ để đồng bộ với backend
+      await api.patch(`/gmail/emails/${emailId}/star`, {
+        starred: newStarred,
+      });
+      // Only invalidate mailboxes for count updates, optimistic UI handles the rest
       queryClient.invalidateQueries({ queryKey: ['mailboxes'] });
-      queryClient.invalidateQueries({ queryKey: ['emails', selectedMailbox] });
-      queryClient.invalidateQueries({ queryKey: ['emails', 'starred'] });
-      // Nếu đang xem email này ở Column 3, re-fetch để update UI
       if (selectedEmail === emailId) {
         queryClient.invalidateQueries({ queryKey: ['email', emailId] });
       }
     } catch (err) {
       console.error('Star API error:', err);
-      // Nếu lỗi, revert lại state và cache
       setStarredState((prev) => ({
         ...prev,
         [emailId]: !newStarred,
       }));
-      queryClient.setQueryData(['emails', selectedMailbox], (oldData: any) => {
-        if (!Array.isArray(oldData)) return oldData;
-        return oldData.map((e: any) => 
-          e.id === emailId ? { ...e, starred: !newStarred } : e
-        );
-      });
+      queryClient.setQueryData(
+        ['emails', selectedMailbox],
+        (oldData: any) => {
+          if (!Array.isArray(oldData)) return oldData;
+          return oldData.map((e: any) =>
+            e.id === emailId ? { ...e, starred: !newStarred } : e,
+          );
+        },
+      );
       toast.error('Lỗi cập nhật trạng thái starred!');
     }
   };
 
-  // Hàm toggle trạng thái đã đọc/chưa đọc cho email
   const handleToggleRead = async (emailId: string) => {
-    if (!emails) return;
-    const emailObj = emails.find((e: any) => e.id === emailId);
-    if (!emailObj) return;
-    const newRead = !emailObj.read;
-    
-    // Optimistic update: cập nhật TẤT CẢ cache liên quan
-    queryClient.setQueryData(['emails', selectedMailbox], (oldData: any) => {
-      if (!Array.isArray(oldData)) return oldData;
-      return oldData.map((e: any) => 
-        e.id === emailId ? { ...e, read: newRead } : e
-      );
+    const newRead = !readState[emailId];
+    console.log(
+      `Toggle read for email ${emailId}: ${readState[emailId]} -> ${newRead}`,
+    );
+
+    // Update readState immediately for instant UI feedback
+    setReadState((prev) => ({
+      ...prev,
+      [emailId]: newRead,
+    }));
+
+    // Update React Query cache to sync detail view
+    queryClient.setQueryData(['email', emailId], (oldDetail: any) => {
+      if (!oldDetail) return oldDetail;
+      return { ...oldDetail, read: newRead };
     });
-    
-    // Update cache của starred mailbox nếu email có starred
-    if (emailObj.starred) {
-      queryClient.setQueryData(['emails', 'starred'], (oldData: any) => {
-        if (!Array.isArray(oldData)) return oldData;
-        return oldData.map((e: any) => 
-          e.id === emailId ? { ...e, read: newRead } : e
-        );
-      });
-    }
-    
+
+    // DO NOT remove email from cache, just update read state
+    // Email will stay in list until manual refresh or folder change
+
     try {
-      await api.patch(`/gmail/emails/${emailId}/read`, { read: newRead });
-      // Invalidate TẤT CẢ để đồng bộ với backend (backend đã tự động cập nhật count)
+      await api.patch(`/gmail/emails/${emailId}/read`, {
+        read: newRead,
+      });
+      // Only invalidate mailboxes to update unread count, NOT emails list
       queryClient.invalidateQueries({ queryKey: ['mailboxes'] });
-      queryClient.invalidateQueries({ queryKey: ['emails', selectedMailbox] });
-      if (emailObj.starred) {
-        queryClient.invalidateQueries({ queryKey: ['emails', 'starred'] });
-      }
-      // Nếu đang xem email này ở Column 3, re-fetch để update UI
-      if (selectedEmail === emailId) {
-        queryClient.invalidateQueries({ queryKey: ['email', emailId] });
-      }
     } catch (err) {
-      // Nếu lỗi, revert lại cache
-      queryClient.setQueryData(['emails', selectedMailbox], (oldData: any) => {
-        if (!Array.isArray(oldData)) return oldData;
-        return oldData.map((e: any) => 
-          e.id === emailId ? { ...e, read: !newRead } : e
-        );
+      console.error('Read API error:', err);
+      // Rollback on error
+      setReadState((prev) => ({
+        ...prev,
+        [emailId]: !newRead,
+      }));
+      queryClient.setQueryData(['email', emailId], (oldDetail: any) => {
+        if (!oldDetail) return oldDetail;
+        return { ...oldDetail, read: !newRead };
       });
       toast.error('Lỗi cập nhật trạng thái đã đọc/chưa đọc!');
     }
   };
 
-  const handleEmailSelect = (emailId: string) => {
-    // Click vào email sẽ mở email detail
-    // KHÔNG thêm vào selectedEmails (chưa tick checkbox)
-    setSelectedEmail(emailId);
-    setMobileView('email');
-    // Tự động đánh dấu đã đọc khi click vào email chưa đọc
-    if (emails) {
-      const emailObj = emails.find((e: any) => e.id === emailId);
-      if (emailObj && !emailObj.read) {
-        handleToggleRead(emailId);
+
+  const handleEmailSelect = async (emailId: string) => {
+    // If in UNREAD mailbox, remove read emails from cache when selecting new email
+    if (selectedMailbox === 'UNREAD' && selectedEmail !== emailId) {
+      queryClient.setQueryData(['emails', 'UNREAD'], (oldData: any) => {
+        if (!oldData || !oldData.messages) return oldData;
+        // Remove emails that are marked as read in readState
+        return {
+          ...oldData,
+          messages: oldData.messages.filter((e: any) => {
+            // Keep email if it's not in readState or if it's marked as unread
+            return readState[e.id] === undefined || !readState[e.id];
+          })
+        };
+      });
+    }
+
+    const emailObj = emails.find((e: any) => e.id === emailId);
+    if (selectedMailbox === 'DRAFT' && emailObj) {
+      // Nếu là thư nháp, mở compose và điền lại nội dung
+      try {
+        // Fetch full email details to get body and attachments
+        const { data: draftDetail } = await api.get(`/gmail/emails/${emailId}`);
+        
+        // Extract recipients from headers
+        const toHeader = draftDetail.headers?.To || emailObj.to || '';
+        const ccHeader = draftDetail.headers?.Cc || emailObj.cc || '';
+        const bccHeader = draftDetail.headers?.Bcc || emailObj.bcc || '';
+        const subjectHeader = draftDetail.headers?.Subject || emailObj.subject || '';
+        
+        setComposeTo(toHeader);
+        setComposeCc(ccHeader);
+        setComposeBcc(bccHeader);
+        setComposeSubject(subjectHeader);
+        setComposeBody(draftDetail.body || emailObj.body || '');
+        setComposeAttachments([]); // Attachments handling can be enhanced later
+        setShowCc(!!ccHeader);
+        setShowBcc(!!bccHeader);
+        setComposeErrors({});
+        setShowComposeModal(true);
+      } catch (err) {
+        console.error('Error loading draft:', err);
+        toast.error('Không thể mở thư nháp');
       }
+      return;
+    }
+    setSelectedEmail(emailId);
+    setMobileView("email");
+    setSelectedEmails(new Set());
+    setShowCheckboxes(false);
+    if (emailObj && !emailObj.read) {
+      handleToggleRead(emailId);
     }
   };
 
-  // Hàm toggle checkbox
+
   const handleToggleCheckbox = (emailId: string) => {
-    setSelectedEmails(prev => {
+    setSelectedEmails((prev) => {
       const newSet = new Set(prev);
       if (newSet.has(emailId)) {
         newSet.delete(emailId);
-        // Tắt checkbox mode nếu không còn email nào được chọn
         if (newSet.size === 0) {
           setShowCheckboxes(false);
-          setSelectedEmail(null); // Clear selectedEmail để tất cả email hiện avatar
+          setSelectedEmail(null);
         }
       } else {
         newSet.add(emailId);
-        // Bật checkbox mode khi user tick vào checkbox
         setShowCheckboxes(true);
       }
       return newSet;
     });
   };
 
-  // Hàm select all / deselect all
   const handleToggleSelectAll = () => {
-    if (!emails) return;
-    const visibleEmails = emails.filter((email: any) => {
-      if (selectedMailbox === 'starred') {
-        return starredState[email.id];
-      }
-      return true;
-    });
-    
-    if (selectedEmails.size === visibleEmails.length) {
-      // Deselect all
+    if (!filteredEmails) return;
+
+    if (selectedEmails.size === paginatedEmails.length) {
       setSelectedEmails(new Set());
-      setShowCheckboxes(false); // Tắt checkbox mode khi deselect all
+      setShowCheckboxes(false);
     } else {
-      // Select all
-      setShowCheckboxes(true); // Bật checkbox mode
-      setSelectedEmails(new Set(visibleEmails.map((e: any) => e.id)));
+      setShowCheckboxes(true);
+      setSelectedEmails(new Set(paginatedEmails.map((e: any) => e.id)));
     }
   };
 
-  // Hàm xử lý resize columns
-  const handleMouseDown = (dividerIndex: number) => (e: React.MouseEvent) => {
+  const handleMouseDown = (dividerIndex: number) => (
+    e: React.MouseEvent,
+  ) => {
     e.preventDefault();
     const startX = e.clientX;
     const startMailboxWidth = mailboxWidth;
@@ -683,12 +700,16 @@ export default function Inbox() {
       const deltaPercent = (deltaX / containerWidth) * 100;
 
       if (dividerIndex === 1) {
-        // Resize mailbox column
-        const newMailboxWidth = Math.max(15, Math.min(30, startMailboxWidth + deltaPercent));
+        const newMailboxWidth = Math.max(
+          15,
+          Math.min(30, startMailboxWidth + deltaPercent),
+        );
         setMailboxWidth(newMailboxWidth);
       } else if (dividerIndex === 2) {
-        // Resize email list column
-        const newEmailListWidth = Math.max(30, Math.min(50, startEmailListWidth + deltaPercent));
+        const newEmailListWidth = Math.max(
+          30,
+          Math.min(50, startEmailListWidth + deltaPercent),
+        );
         setEmailListWidth(newEmailListWidth);
       }
     };
@@ -702,52 +723,142 @@ export default function Inbox() {
     document.addEventListener('mouseup', handleMouseUp);
   };
 
-
-
-  // Hàm xử lý bulk mark read/unread
-  const handleBulkMarkRead = async (read: boolean) => {
-    if (selectedEmails.size === 0) return;
-    
+  const handleRefresh = async (silent?: boolean) => {
+    const toastId = silent ? undefined : toast.loading('Đang đồng bộ với Gmail...');
     try {
-      await api.patch('/gmail/emails/bulk-read', {
-        ids: Array.from(selectedEmails),
-        read
-      });
-      
-      // Invalidate cache
+      await api.post('/gmail/refresh');
+      // Incremental sync is fast, invalidate both emails and mailboxes
       queryClient.invalidateQueries({ queryKey: ['emails', selectedMailbox] });
       queryClient.invalidateQueries({ queryKey: ['mailboxes'] });
-      // Không unselect - giữ nguyên selection
+      if (!silent) {
+        toast.success('Đã đồng bộ thành công!', { id: toastId });
+      }
     } catch (err) {
-      console.error('Bulk mark read error:', err);
-      toast.error('Lỗi khi cập nhật trạng thái!');
+      console.error('Refresh error:', err);
+      if (!silent) {
+        toast.error('Lỗi khi đồng bộ!', { id: toastId });
+      }
     }
   };
 
-  // Hàm xóa email
+  const handleBulkMarkRead = async (read: boolean) => {
+    // Nếu chưa tick checkbox → dùng email đang xem
+    const targetIds =
+      selectedEmails.size > 0
+        ? Array.from(selectedEmails)
+        : selectedEmail
+          ? [selectedEmail]
+          : [];
+
+    if (targetIds.length === 0) return;
+
+    // ===== OPTIMISTIC UI: Update readState immediately =====
+    const newReadState: { [id: string]: boolean } = {};
+    targetIds.forEach(id => {
+      newReadState[id] = read;
+    });
+    setReadState(prev => ({ ...prev, ...newReadState }));
+
+    // Preserve scroll position
+    const scrollOffset = emailListComponentRef.current?.preserveScroll?.() || 0;
+
+    try {
+      await api.patch('/gmail/emails/bulk-read', {
+        ids: targetIds,
+        read,
+      });
+
+      toast.success(`Đã đánh dấu ${targetIds.length} email!`);
+
+      // Only invalidate mailboxes for count updates
+      queryClient.invalidateQueries({ queryKey: ['mailboxes'] });
+
+      // Restore scroll after state update
+      setTimeout(() => {
+        emailListComponentRef.current?.restoreScroll?.(scrollOffset);
+      }, 0);
+    } catch (err) {
+      console.error('Bulk mark read error:', err);
+      toast.error('Lỗi khi cập nhật trạng thái!');
+
+      // Rollback on error
+      const rollbackState: { [id: string]: boolean } = {};
+      targetIds.forEach(id => {
+        rollbackState[id] = !read;
+      });
+      setReadState(prev => ({ ...prev, ...rollbackState }));
+    }
+  };
+
+  const handleMarkSpam = async (emailId: string) => {
+    try {
+      await api.patch(`/gmail/emails/${emailId}/spam`);
+
+      // Only invalidate mailboxes for count updates
+      queryClient.invalidateQueries({ queryKey: ['mailboxes'] });
+
+      toast.success("Đã báo cáo spam!");
+      await handleRefresh(true);
+    } catch (err) {
+      console.error("Spam error:", err);
+      toast.error("Lỗi khi báo cáo spam!");
+    }
+  };
+
   const handleDeleteEmail = async (emailId?: string) => {
     const id = emailId || selectedEmail;
     if (!id) return;
-    
-    if (!confirm('Bạn chắc chắn muốn xóa email này?')) return;
-    
+
+    // Check if email is in trash
+    const emailObj = emails?.find((e: any) => e.id === id);
+    const isInTrash = emailObj?.labelIds?.includes('TRASH') || selectedMailbox === 'TRASH';
+
+    if (isInTrash) {
+      // Use native browser confirm dialog
+      const confirmed = window.confirm('Thư sẽ được xóa vĩnh viễn. Bạn chắc chắn muốn xóa nó chứ?');
+      if (!confirmed) return;
+      await performDelete(id, true);
+      return;
+    }
+
+    // Delete immediately for non-trash emails
+    await performDelete(id, false);
+  };
+
+  const performDelete = async (emailId: string, isPermanent: boolean) => {
     try {
-      await api.delete(`/gmail/emails/${id}`);
-      
-      // Đóng detail view
-      setSelectedEmail(null);
+      await api.delete(`/gmail/emails/${emailId}`);
+      // Only clear selectedEmail if the deleted email is no longer in emails list
+      if (selectedEmail === emailId) {
+        // Wait for emails to refresh, then check if email still exists
+        setTimeout(() => {
+          const stillExists = emails?.some((e: any) => e.id === emailId);
+          if (!stillExists) {
+            setSelectedEmail(null);
+          }
+        }, 500);
+      }
       setSelectedEmails(new Set());
-      
-      // Invalidate cache
-      queryClient.invalidateQueries({ queryKey: ['emails', selectedMailbox] });
+      // Only invalidate mailboxes for count updates
       queryClient.invalidateQueries({ queryKey: ['mailboxes'] });
+      queryClient.invalidateQueries({ queryKey: ['emails', selectedMailbox] });
       
-      toast.success('Xóa email thành công!');
+      if (isPermanent) {
+        toast.success('Đã xóa vĩnh viễn.');
+      } else {
+        toast.success('Đã xóa email.');
+      }
+      
+      await handleRefresh(true);
     } catch (err: any) {
       console.error('Delete email error:', err);
       console.error('Response:', err.response?.data);
-      const errorMsg = err.response?.data?.message || 'Lỗi khi xóa email!';
-      if (errorMsg.includes('insufficient permissions') || errorMsg.includes('Insufficient permissions')) {
+      const errorMsg =
+        err.response?.data?.message || 'Lỗi khi xóa email!';
+      if (
+        errorMsg.includes('insufficient permissions') ||
+        errorMsg.includes('Insufficient permissions')
+      ) {
         toast.error('Cần cấp quyền. Vui lòng đăng nhập lại.');
       } else {
         toast.error(errorMsg);
@@ -755,28 +866,42 @@ export default function Inbox() {
     }
   };
 
-  // Hàm lưu trữ email
+  const handleConfirmDelete = async () => {
+    if (emailToDelete) {
+      await performDelete(emailToDelete, true);
+      setShowDeleteConfirm(false);
+      setEmailToDelete(null);
+    }
+  };
+
+  const handleCancelDelete = () => {
+    setShowDeleteConfirm(false);
+    setEmailToDelete(null);
+  };
+
   const handleArchiveEmail = async (emailId?: string) => {
     const id = emailId || selectedEmail;
     if (!id) return;
-    
+
     try {
       await api.patch(`/gmail/emails/${id}/archive`, {});
-      
-      // Đóng detail view
+
       setSelectedEmail(null);
       setSelectedEmails(new Set());
-      
-      // Invalidate cache
-      queryClient.invalidateQueries({ queryKey: ['emails', selectedMailbox] });
+
+      // Only invalidate mailboxes for count updates
       queryClient.invalidateQueries({ queryKey: ['mailboxes'] });
-      
+
       toast.success('Lưu trữ email thành công!');
     } catch (err: any) {
       console.error('Archive email error:', err);
       console.error('Response:', err.response?.data);
-      const errorMsg = err.response?.data?.message || 'Lỗi khi lưu trữ email!';
-      if (errorMsg.includes('insufficient permissions') || errorMsg.includes('Insufficient permissions')) {
+      const errorMsg =
+        err.response?.data?.message || 'Lỗi khi lưu trữ email!';
+      if (
+        errorMsg.includes('insufficient permissions') ||
+        errorMsg.includes('Insufficient permissions')
+      ) {
         toast.error('Cần cấp quyền. Vui lòng đăng nhập lại.');
       } else {
         toast.error(errorMsg);
@@ -784,933 +909,940 @@ export default function Inbox() {
     }
   };
 
-  // Hàm refresh emails
-  const handleRefresh = () => {
-    queryClient.invalidateQueries({ queryKey: ['emails', selectedMailbox] });
-    queryClient.invalidateQueries({ queryKey: ['mailboxes'] });
+  const handleMoveTo = async (targetLabel: string) => {
+    const ids =
+      selectedEmails.size > 0
+        ? Array.from(selectedEmails)
+        : selectedEmail
+          ? [selectedEmail]
+          : [];
+
+    if (ids.length === 0) return;
+
+    // Không cho chuyển vào SENT nếu không phải email mình gửi
+    if (targetLabel === "SENT" && user) {
+      const invalid = ids.some((id) => {
+        const em = emails.find((e: any) => e.id === id);
+        return em && !em.sender?.toLowerCase().includes(user.email.toLowerCase());
+      });
+
+      if (invalid) {
+        toast.error("Không thể chuyển vào 'Đã gửi' vì có email không phải bạn gửi.");
+        setShowMoveToMenu(false);
+        return;
+      }
+    }
+
+    // ===== OPTIMISTIC UI: Update cache immediately =====
+    const movedEmails = ids.map(id => emails.find((e: any) => e.id === id)).filter(Boolean);
+
+    // Remove from current mailbox
+    queryClient.setQueryData(['emails', selectedMailbox], (oldData: any) => {
+      if (!Array.isArray(oldData)) return oldData;
+      return oldData.filter((e: any) => !ids.includes(e.id));
+    });
+
+    // Add to target mailbox cache
+    queryClient.setQueryData(['emails', targetLabel], (oldData: any) => {
+      if (!Array.isArray(oldData)) return [];
+      const updatedEmails = movedEmails.map((email: any) => ({
+        ...email,
+        labelIds: [targetLabel, ...(email.labelIds || []).filter((l: string) => l !== selectedMailbox)]
+      }));
+      return [...updatedEmails, ...oldData];
+    });
+
+    // Update mailboxes count optimistically
+    queryClient.setQueryData(['mailboxes'], (oldMailboxes: any) => {
+      if (!Array.isArray(oldMailboxes)) return oldMailboxes;
+      return oldMailboxes.map((mb: any) => {
+        if (mb.id === selectedMailbox) {
+          return { ...mb, messagesTotal: Math.max(0, mb.messagesTotal - ids.length) };
+        }
+        if (mb.id === targetLabel) {
+          return { ...mb, messagesTotal: mb.messagesTotal + ids.length };
+        }
+        return mb;
+      });
+    });
+
+    setSelectedEmail(null);
+    setSelectedEmails(new Set());
+    setShowMoveToMenu(false);
+
+    try {
+      // API call
+      await Promise.all(ids.map(id => api.post(`/gmail/emails/${id}/move`, { label: targetLabel })));
+
+      toast.success(`Đã chuyển ${ids.length} email!`);
+
+      // Only invalidate mailboxes for count sync
+      queryClient.invalidateQueries({ queryKey: ['mailboxes'] });
+      await handleRefresh(true);
+    } catch (err) {
+      console.error("Move error:", err);
+      toast.error("Lỗi khi chuyển thư! Đang hoàn tác...");
+
+      // Rollback on error
+      queryClient.invalidateQueries({ queryKey: ["emails", selectedMailbox] });
+      queryClient.invalidateQueries({ queryKey: ["emails", targetLabel] });
+      queryClient.invalidateQueries({ queryKey: ["mailboxes"] });
+    }
   };
 
-  // Hàm Reply - trả lời email
   const handleReply = () => {
     if (!email) return;
-    
-    // Mở compose modal với To = sender của email gốc
-    setComposeTo(email.from);
+    // Chỉ lấy email address, không lấy tên
+    let senderEmail = email.from;
+    // Nếu có dạng "Tên <email>", chỉ lấy phần trong <>
+    const match = senderEmail.match(/<([^>]+)>/);
+    if (match) senderEmail = match[1];
+    senderEmail = senderEmail.trim();
+    setComposeTo(senderEmail);
+    setComposeCc('');
+    setComposeBcc('');
+    setShowCc(false);
+    setShowBcc(false);
     setComposeSubject(`Re: ${email.subject.replace(/^Re:\s*/i, '')}`);
-    setComposeBody(''); // Để trống cho user tự gõ
+    setComposeBody('');
     setShowComposeModal(true);
   };
 
-  // Hàm Reply All - trả lời tất cả
   const handleReplyAll = () => {
     if (!email) return;
-    
-    // To = người gửi gốc + tất cả người nhận khác (trừ mình - "Me <me@example.com>")
-    const allRecipients = [email.from];
-    
-    // Thêm tất cả người trong To (trừ mình)
-    if (email.to) {
-      const toList = email.to.split(',').map((e: string) => e.trim());
-      // Loại bỏ email của mình (Me <me@example.com> hoặc me@example.com)
-      const otherRecipients = toList.filter((e: string) => 
-        !e.toLowerCase().includes('me@example.com') && 
-        !e.toLowerCase().startsWith('me <')
-      );
-      allRecipients.push(...otherRecipients);
-    }
-    
-    setComposeTo(allRecipients.join(', '));
-    
-    // Giữ lại Cc từ email gốc
+    // Chỉ lấy email address của người gửi
+    let senderEmail = email.from;
+    const match = senderEmail.match(/<([^>]+)>/);
+    if (match) senderEmail = match[1];
+    senderEmail = senderEmail.trim();
+    // Reply all: gửi cho người gửi + cc
+    setComposeTo(senderEmail);
     if (email.cc) {
-      setComposeCc(email.cc);
+      // Chỉ lấy email address, không lấy tên
+      const ccList = email.cc.split(',').map((e: string) => {
+        const m = e.match(/<([^>]+)>/);
+        return m ? m[1].trim() : e.trim();
+      });
+      setComposeCc(ccList.join(', '));
       setShowCc(true);
+    } else {
+      setComposeCc('');
+      setShowCc(false);
     }
-    
+    setComposeBcc('');
+    setShowBcc(false);
     setComposeSubject(`Re: ${email.subject.replace(/^Re:\s*/i, '')}`);
-    setComposeBody(''); // Để trống cho user tự gõ
+    setComposeBody('');
     setShowComposeModal(true);
   };
 
-  // Hàm Forward - chuyển tiếp email
   const handleForward = () => {
     if (!email) return;
-    
-    // Clear To (user needs to fill), keep subject with Fwd:, include original content
     setComposeTo('');
     setComposeSubject(`Fwd: ${email.subject.replace(/^Fwd:\s*/i, '')}`);
-    setComposeBody(`\n\n--- Forwarded message ---\nFrom: ${email.from}\nDate: ${new Date(email.received).toLocaleString('vi-VN')}\nSubject: ${email.subject}\nTo: ${email.to}\n\n${email.body.replace(/<[^>]*>/g, '')}`);
+    setComposeBody(
+      `\n\n--- Forwarded message ---\nFrom: ${email.from}\nDate: ${new Date(email.received).toLocaleString('vi-VN')}\nSubject: ${email.subject}\nTo: ${email.to}\n\n${email.body.replace(/<[^>]*>/g, '')}`
+    );
     setShowComposeModal(true);
   };
 
-  // Helper function to read a File object as a base64 string
-  const readFileAsBase64 = (file: File): Promise<string> => {
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => {
-        // Remove the "data:mime/type;base64," prefix
-        const base64String = (reader.result as string).split(',')[1];
-        resolve(base64String);
-      };
-      reader.onerror = (error) => reject(error);
-      reader.readAsDataURL(file);
-    });
+  // Sử dụng hook useComposeHandlers cho xử lý gửi email
+  const { handleSendEmail, readFileAsBase64 } = useComposeHandlers({
+    composeTo,
+    setComposeTo,
+    composeCc,
+    setComposeCc,
+    composeBcc,
+    setComposeBcc,
+    composeSubject,
+    setComposeSubject,
+    composeBody,
+    setComposeBody,
+    composeAttachments,
+    setComposeAttachments,
+    setShowCc,
+    setShowBcc,
+    setShowComposeModal,
+    setComposeErrors,
+    setIsSending,
+    user,
+    onSendSuccess: () => handleRefresh(true),
+  });
+
+  const getMailboxIcon = (mailbox: any) => {
+    const key = mailbox.id?.toUpperCase();
+    return mailboxIcons[key] || mailboxIcons.default;
   };
 
-  // Hàm gửi email
-  const handleSendEmail = async () => {
-    if (!composeTo || !composeSubject || (!composeBody && composeAttachments.length === 0)) {
-      alert('Vui lòng điền đầy đủ thông tin hoặc thêm tệp đính kèm!');
-      return;
-    }
-    
-    try {
-      // Process attachments into base64
-      const processedAttachments = await Promise.all(
-        composeAttachments.map(async (file) => {
-          const base64Content = await readFileAsBase64(file);
-          return {
-            filename: file.name,
-            mimeType: file.type,
-            base64Content: base64Content,
-          };
-        }),
-      );
 
-      await api.post('/gmail/send', {
-        to: composeTo,
-        cc: composeCc,
-        bcc: composeBcc,
-        subject: composeSubject,
-        body: composeBody,
-        attachments: processedAttachments,
-      });
-      
-      // Reset form và đóng modal
-      setComposeTo('');
-      setComposeCc('');
-      setComposeBcc('');
-      setComposeSubject('');
-      setComposeBody('');
-      setComposeAttachments([]);
-      setShowCc(false);
-      setShowBcc(false);
-      setShowComposeModal(false);
-      
-      // Refresh sent mailbox
-      queryClient.invalidateQueries({ queryKey: ['emails', 'sent'] });
-      toast.success('Gửi email thành công!');
-    } catch (err) {
-      console.error('Send email error:', err);
-      toast.error('Lỗi khi gửi email!');
-    }
+
+  // Helper label hiển thị
+  const getMailboxLabel = (mailbox: any) => {
+    return getMailboxLabelVN(mailbox);
   };
+
+
+
+  const currentMailboxLabel =
+    getMailboxLabelVN(
+      mailboxes?.find((mb: any) => mb.id === selectedMailbox) || { id: selectedMailbox }
+    );
+
+  // ======== THỨ TỰ MAILBOX GIỐNG GMAIL =========
+  const mailboxOrder = [
+    "CHAT",
+    "INBOX",
+    "UNREAD",
+    "STARRED",
+    "SENT",
+    "DRAFT",
+    "IMPORTANT",
+    "SPAM",
+    "TRASH",
+  ];
 
 
   return (
-    <div className="inbox-container flex flex-col h-[calc(100vh-65px)] bg-white">
-      {/* Action Bar - ngang hàng với navbar, ở trên cùng */}
-      <div className="border-b bg-white">
-        {/* Hàng 1: Action buttons */}
-        <div className="flex items-center gap-2 px-4 py-2">
-          {/* Compose button */}
-          <button
-            className="flex items-center gap-2 px-3 py-1.5 bg-blue-500 text-white rounded hover:bg-blue-600"
-            onClick={() => setShowComposeModal(true)}
-          >
-            <FiEdit size={16} />
-            <span className="text-sm">Thư mới</span>
-          </button>
-          
-          <div className="h-6 w-px bg-gray-300 mx-1" />
-          
-          {/* Refresh */}
-          <button
-            className="p-2 hover:bg-gray-200 rounded"
-            onClick={handleRefresh}
-            title="Làm mới"
-            onMouseEnter={() => setIsRefreshHovered(true)}
-            onMouseLeave={() => setIsRefreshHovered(false)}
-          >
-            <FiRefreshCw size={16} className={isRefreshHovered ? "text-blue-700" : "text-blue-600"} />
-          </button>
-          
-
-          
-
-          
-
-          
-          <div className="h-6 w-px bg-gray-300 mx-1" />
-          
-          {/* Reply, Reply All, Forward buttons - chỉ enabled khi chọn đúng 1 email */}
-          <button
-            className="p-2 hover:bg-gray-200 rounded disabled:opacity-50 disabled:cursor-not-allowed"
-            onClick={handleReply}
-            disabled={!((selectedEmail && selectedEmails.size === 0) || selectedEmails.size === 1)}
-            title="Trả lời"
-            onMouseEnter={() => setIsReplyHovered(true)}
-            onMouseLeave={() => setIsReplyHovered(false)}
-          >
-            <ArrowReply20Regular className={isReplyHovered && ((selectedEmail && selectedEmails.size === 0) || selectedEmails.size === 1) ? "text-blue-700" : "text-blue-600"} />
-          </button>
-          <button
-            className="p-2 hover:bg-gray-200 rounded disabled:opacity-50 disabled:cursor-not-allowed"
-            onClick={handleReplyAll}
-            disabled={!((selectedEmail && selectedEmails.size === 0) || selectedEmails.size === 1)}
-            title="Trả lời tất cả"
-            onMouseEnter={() => setIsReplyAllHovered(true)}
-            onMouseLeave={() => setIsReplyAllHovered(false)}
-          >
-            <ArrowReplyAll20Regular className={isReplyAllHovered && ((selectedEmail && selectedEmails.size === 0) || selectedEmails.size === 1) ? "text-blue-700" : "text-blue-600"} />
-          </button>
-          <button
-            className="p-2 hover:bg-gray-200 rounded disabled:opacity-50 disabled:cursor-not-allowed"
-            onClick={handleForward}
-            disabled={!((selectedEmail && selectedEmails.size === 0) || selectedEmails.size === 1)}
-            title="Chuyển tiếp"
-            onMouseEnter={() => setIsForwardHovered(true)}
-            onMouseLeave={() => setIsForwardHovered(false)}
-          >
-            <ArrowForward20Regular className={isForwardHovered && ((selectedEmail && selectedEmails.size === 0) || selectedEmails.size === 1) ? "text-blue-700" : "text-blue-600"} />
-          </button>
-          
-          <div className="h-6 w-px bg-gray-300 mx-1" />
-          
-          {/* Read Toggle Button - Thay đổi theo việc có chọn email hay không */}
-          {selectedEmails.size === 0 ? (
-            // Không chọn email - Nút "Đánh dấu tất cả"
-            <button
-              className="flex items-center gap-2 px-3 py-1.5 hover:bg-gray-200 rounded text-sm"
-              onClick={async () => {
-                if (!emails || emails.length === 0) return;
-                if (!confirm('Đánh dấu tất cả email là đã đọc?')) return;
-                
-                try {
-                  // Đánh dấu tất cả email là đã đọc
-                  for (const email of emails) {
-                    if (!email.read) {
-                      await api.patch(`/gmail/emails/${email.id}/read`, { read: true });
-                    }
-                  }
-                  
-                  // Invalidate queries
-                  queryClient.invalidateQueries({ queryKey: ['mailboxes'] });
-                  queryClient.invalidateQueries({ queryKey: ['emails', selectedMailbox] });
-                  queryClient.invalidateQueries({ queryKey: ['emails', 'starred'] });
-                  
-                  alert('Đã đánh dấu tất cả email là đã đọc!');
-                } catch (error) {
-                  console.error('Mark all as read error:', error);
-                  alert('Lỗi khi đánh dấu email!');
-                }
-              }}
-              title="Đánh dấu tất cả là đã đọc"
-            >
-              <LuMails className="text-gray-600" size={18} />
-              <span className="text-gray-700">Đánh dấu tất cả là đã đọc</span>
-            </button>
-          ) : (
-            // Có chọn email - Toggle Đã đọc/Chưa đọc
-            <button
-              className="flex items-center gap-2 px-3 py-1.5 hover:bg-gray-200 rounded text-sm"
-              onClick={() => {
-                // Kiểm tra xem có email nào chưa đọc không
-                const hasUnread = Array.from(selectedEmails).some(id => {
-                  const email = emails?.find((e: any) => e.id === id);
-                  return email && !email.read;
-                });
-                
-                // Nếu có email chưa đọc → đánh dấu tất cả là đã đọc
-                // Nếu tất cả đã đọc → đánh dấu tất cả là chưa đọc
-                handleBulkMarkRead(hasUnread);
-              }}
-              title="Toggle đã đọc/chưa đọc"
-            >
-              <LuMailOpen className="text-gray-600" size={18} />
-              <span className="text-gray-700">Đã đọc/Chưa đọc</span>
-            </button>
-          )}
-          
-          {/* Archive Button - hiện khi chọn email hoặc có email được chọn */}
-          {(selectedEmail || selectedEmails.size > 0) && (
-            <button
-              className="p-2 hover:bg-gray-200 rounded"
-              onClick={() => handleArchiveEmail()}
-              title="Lưu trữ"
-            >
-              <FolderArrowRight20Regular className="text-blue-600" />
-            </button>
-          )}
-          
-          {/* Delete Button - hiện khi chọn email hoặc có email được chọn */}
-          {(selectedEmail || selectedEmails.size > 0) && (
-            <button
-              className="p-2 hover:bg-gray-200 rounded text-red-600 hover:text-red-700"
-              onClick={() => handleDeleteEmail()}
-              title="Xóa"
-            >
-              <FiTrash2 size={16} />
-            </button>
-          )}
-          
-          <div className="flex-1" />
-          
-          {/* Keyboard shortcuts help */}
-          <button
-            className="p-2 hover:bg-gray-200 rounded text-gray-600 text-sm"
-            onClick={() => setShowKeyboardHelp(true)}
-            title="Keyboard shortcuts (Shift + ?)"
-          >
-            <span className="font-semibold">?</span>
-          </button>
-          
-          {selectedEmails.size > 0 && (
-            <span className="text-sm text-gray-600">
-              {selectedEmails.size} đã chọn
-            </span>
-          )}
-        </div>
-      </div>
-
-      {/* Main content: 3 columns */}
+    <div
+      className="inbox-container flex flex-col h-screen overflow-hidden"
+      style={{
+        backgroundColor: 'var(--bg-primary)',
+        color: 'var(--text-primary)'
+      }}
+    >
+      {/* MAIN CONTENT: 3 columns */}
       <div className="flex flex-1 overflow-hidden">
-        {/* Column 1: Mailboxes - Always hidden on mobile, show on desktop */}
+        {/* Column 1: Mailboxes */}
+        {/* Column 1: Mailboxes + Profile */}
         <div
-          className="hidden md:flex md:flex-col bg-gray-50 overflow-hidden border-r"
-          style={{ width: `${mailboxWidth}%` }}
+          className="hidden md:flex md:flex-col overflow-hidden border-r"
+          style={{
+            width: '260px',
+            backgroundColor: 'var(--bg-primary)',
+            borderColor: 'var(--border-primary)'
+          }}
         >
-        <div className="flex justify-between items-center p-4 flex-shrink-0">
-          <h2 className="text-lg font-semibold">Mailboxes</h2>
-        </div>
-        <div className="flex-1 overflow-y-auto px-4 pb-4">
-        {mailboxesLoading ? (
-          <div className="center-spinner">
-            <div className="spinner"></div>
+
+          {/* === PROFILE SECTION === */}
+          <div
+            className="px-3 py-3 border-b flex items-center gap-3 relative"
+            style={{
+              borderColor: 'var(--border-primary)',
+              backgroundColor: 'var(--bg-primary)'
+            }}
+          >
+
+            <button
+              className="flex items-center gap-2 w-full rounded-lg p-2 transition-all"
+              style={{ color: 'var(--text-primary)' }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.backgroundColor = 'var(--bg-secondary)';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.backgroundColor = 'transparent';
+              }}
+              onClick={() => setShowProfileMenu(!showProfileMenu)}
+            >
+              <img
+                src={user?.picture || "https://www.gravatar.com/avatar?d=mp&s=200"}
+                alt="avatar"
+                className="w-9 h-9 rounded-full"
+                style={{ border: '1px solid var(--border-primary)' }}
+              />
+
+              <div className="flex flex-col text-left flex-1 min-w-0">
+                <span
+                  className="font-medium text-sm truncate"
+                  style={{ color: 'var(--text-primary)' }}
+                >
+                  {user?.name || "User"}
+                </span>
+                <span
+                  className="text-xs truncate"
+                  style={{ color: 'var(--text-secondary)' }}
+                >
+                  {user?.email}
+                </span>
+              </div>
+
+              <IoIosArrowDown style={{ color: 'var(--text-tertiary)', flexShrink: 0 }} />
+            </button>
+
+            {showProfileMenu && (
+              <>
+                <div
+                  className="fixed inset-0 z-10"
+                  onClick={() => setShowProfileMenu(false)}
+                />
+
+                <div
+                  className="absolute top-full left-3 mt-2 w-52 rounded-lg shadow-lg border z-20 overflow-hidden"
+                  style={{
+                    backgroundColor: 'var(--bg-primary)',
+                    borderColor: 'var(--border-primary)',
+                    boxShadow: 'var(--shadow-lg)'
+                  }}
+                >
+
+                  <button
+                    className="w-full px-4 py-3 flex items-center gap-3 transition-all"
+                    style={{ color: 'var(--text-primary)' }}
+                    onClick={() => {
+                      toggleTheme();
+                      setShowProfileMenu(false);
+                    }}
+                    onMouseEnter={(e) => {
+                      e.currentTarget.style.backgroundColor = 'var(--bg-secondary)';
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.backgroundColor = 'transparent';
+                    }}
+                  >
+                    <MaterialIcon name={theme === 'light' ? 'dark_mode' : 'light_mode'} size={20} />
+                    {theme === 'light' ? 'Chế độ tối' : 'Chế độ sáng'}
+                  </button>
+
+                  <button
+                    className="w-full px-4 py-3 flex items-center gap-3 font-medium transition-all"
+                    style={{ color: 'var(--error)' }}
+                    onClick={handleLogout}
+                    onMouseEnter={(e) => {
+                      e.currentTarget.style.backgroundColor = 'var(--bg-secondary)';
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.backgroundColor = 'transparent';
+                    }}
+                  >
+                    <MaterialIcon name="logout" size={20} />
+                    Đăng xuất
+                  </button>
+
+                </div>
+              </>
+            )}
+
           </div>
-        ) : mailboxesError ? (
-          <div>Error loading mailboxes</div>
-        ) : (
-          <ul>
-            {mailboxes
-              ?.filter((mailbox: any) => {
-                const allowedSystemLabels = ['INBOX', 'STARRED', 'SENT', 'DRAFT', 'SPAM', 'IMPORTANT', 'UNREAD', 'ALL_MAIL'];
-                // Giữ lại các label hệ thống được phép hoặc label không phải là hệ thống (custom labels)
-                return (
-                  allowedSystemLabels.includes(mailbox.id) ||
-                  (!mailbox.id.startsWith('CATEGORY_') && !mailbox.id.startsWith('SYSTEM_')) // Lọc các category labels của Gmail
-                );
-              })
-              .map((mailbox: any) => (
-              <li
-                key={mailbox.id}
-                role="button"
-                tabIndex={0}
-                aria-label={`${mailbox.name} mailbox`}
-                aria-current={selectedMailbox === mailbox.id ? 'page' : undefined}
-                className={`flex items-center justify-between p-2 mb-1 rounded cursor-pointer hover:bg-gray-200 focus:outline-none ${
-                  selectedMailbox === mailbox.id ? 'bg-blue-100 text-blue-600' : ''
-                }`}
-                onClick={() => handleMailboxSelect(mailbox.id)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' || e.key === ' ') {
-                    e.preventDefault();
-                    handleMailboxSelect(mailbox.id);
-                  }
+
+          {/* COMPOSE BUTTON */}
+          <div className="px-3 pt-3 pb-2">
+            <button
+              className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-full shadow-sm transition-all font-medium"
+              style={{
+                backgroundColor: 'var(--accent-primary)',
+                color: 'white'
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.backgroundColor = 'var(--accent-primary-hover)';
+                e.currentTarget.style.transform = 'translateY(-1px)';
+                e.currentTarget.style.boxShadow = 'var(--shadow-md)';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.backgroundColor = 'var(--accent-primary)';
+                e.currentTarget.style.transform = 'translateY(0)';
+                e.currentTarget.style.boxShadow = 'var(--shadow-sm)';
+              }}
+              onClick={() => setShowComposeModal(true)}
+            >
+              <MaterialIcon name="edit" size={18} />
+              <span>Soạn thư</span>
+            </button>
+          </div>
+
+          {/* MAILBOX LIST */}
+          <div className="flex-1 overflow-y-auto">
+            <MailboxList
+              mailboxes={mailboxes || []}
+              selectedMailbox={selectedMailbox}
+              mailboxOrder={mailboxOrder}
+              getMailboxIcon={getMailboxIcon}
+              getMailboxLabel={getMailboxLabel}
+              mailboxesLoading={mailboxesLoading}
+              mailboxesError={mailboxesError}
+              onSelect={handleMailboxSelect}
+            />
+          </div>
+
+        </div>
+
+        {/* Column 2: Email List */}
+        <div
+          className={`border-r flex flex-col ${mobileView === "email" ? "hidden md:flex" : "flex"
+            }`}
+          style={{
+            width: window.innerWidth >= 768 ? '400px' : '100%',
+            minWidth: window.innerWidth >= 768 ? '380px' : undefined,
+            maxWidth: window.innerWidth >= 768 ? '400px' : undefined,
+            borderColor: 'var(--border-primary)',
+            backgroundColor: 'var(--bg-primary)'
+          }}
+        >
+          {/* ===== HEADER ===== */}
+          <div
+            className="border-b flex-shrink-0"
+            style={{
+              borderColor: 'var(--border-primary)',
+              backgroundColor: 'var(--bg-primary)'
+            }}
+          >
+            {/* ===== SEARCH BAR ===== */}
+            <div className="px-3 pt-3 pb-2">
+              <div
+                className="flex items-center rounded-lg px-3 py-2 transition-all"
+                style={{
+                  backgroundColor: 'var(--bg-secondary)',
+                  border: '1px solid var(--border-primary)',
+                }}
+                onFocus={(e: any) => {
+                  e.currentTarget.style.borderColor = 'var(--accent-primary)';
+                }}
+                onBlur={(e: any) => {
+                  e.currentTarget.style.borderColor = 'var(--border-primary)';
                 }}
               >
-                <span className="mr-2">
-                  {
-                    mailboxIcons[
-                      (mailbox.id === 'ALL_MAIL' ? 'all_mail' : (mailbox.name as string).toLowerCase()) as keyof typeof mailboxIcons
-                    ] || mailboxIcons.default
-                  }
+                <span
+                  className="material-symbols-outlined mr-3 flex-shrink-0"
+                  style={{ color: 'var(--text-tertiary)', fontSize: '20px' }}
+                >
+                  search
                 </span>
-                <span className="flex-1 min-w-0 truncate">{mailbox.id === 'ALL_MAIL' ? 'Archive' : mailbox.name}</span>
-                {(mailbox.messagesUnread || 0) > 0 && (
-                  <span className="mailbox-unread-badge">
-                    {mailbox.messagesUnread || 0}
-                  </span>
-                )}
-              </li>
-            ))}
-          </ul>
-        )}
-        </div>
-      </div>
-
-      {/* Divider 1 */}
-      <div
-        className="hidden md:block w-1 bg-gray-300 hover:bg-blue-500 cursor-col-resize"
-        onMouseDown={handleMouseDown(1)}
-      />
-
-      {/* Column 2: Email List - Show by default on mobile, hide when email is selected */}
-      <div
-        className={`border-r flex flex-col w-full ${
-          mobileView === 'email' ? 'hidden md:flex' : 'flex'
-        }`}
-        style={{ width: window.innerWidth >= 768 ? `${emailListWidth}%` : undefined }}
-      >
-        {/* Header đơn giản - chỉ title và select all */}
-        <div className="border-b flex-shrink-0">
-          {/* Title */}
-          <div className="flex justify-between items-center px-4 py-2">
-            {/* Mobile: Mailbox dropdown menu */}
-            <div className="md:hidden relative">
-              <button
-                onClick={() => setShowMailboxMenu(!showMailboxMenu)}
-                className="flex items-center gap-2 text-lg font-semibold hover:text-blue-600"
-              >
-                <span>{selectedMailbox.charAt(0).toUpperCase() + selectedMailbox.slice(1)}</span>
-                <IoIosArrowDown className="text-gray-600" />
-              </button>
-              
-              {showMailboxMenu && (
-                <>
-                  <div 
-                    className="fixed inset-0 z-10" 
-                    onClick={() => setShowMailboxMenu(false)}
-                  ></div>
-                  <div className="absolute left-0 top-full mt-2 w-56 bg-white border border-gray-200 rounded-lg shadow-lg z-20 max-h-96 overflow-y-auto">
-                    {mailboxes
-                      ?.filter((mailbox: any) => {
-                        const allowedSystemLabels = ['INBOX', 'STARRED', 'SENT', 'DRAFT', 'SPAM', 'ALL_MAIL'];
-                        return (
-                          allowedSystemLabels.includes(mailbox.id) ||
-                          !mailbox.id.startsWith('CATEGORY_')
-                        );
-                      })
-                      .map((mailbox: any) => (
-                      <button
-                        key={mailbox.id}
-                        onClick={() => {
-                          handleMailboxSelect(mailbox.id);
-                          setShowMailboxMenu(false);
-                        }}
-                        className={`w-full text-left px-4 py-3 hover:bg-gray-100 flex items-center justify-between border-b last:border-b-0 ${
-                          selectedMailbox === mailbox.id ? 'bg-blue-50 text-blue-600' : ''
-                        }`}
-                      >
-                        <div className="flex items-center gap-3 min-w-0">
-                          <span className="text-lg">
-                            {mailboxIcons[
-                              (mailbox.id === 'ALL_MAIL' ? 'all_mail' : mailbox.id.toLowerCase()) as keyof typeof mailboxIcons
-                            ]}
-                          </span>
-                          <span className="flex-1 min-w-0 truncate">{mailbox.id === 'ALL_MAIL' ? 'Archive' : mailbox.name}</span>
-                        </div>
-                      </button>
-                    ))}
-                  </div>
-                </>
-              )}
+                <input
+                  type="text"
+                  placeholder="Tìm email..."
+                  className="outline-none w-full text-sm"
+                  style={{
+                    backgroundColor: 'transparent',
+                    color: 'var(--text-primary)',
+                  }}
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                />
+              </div>
             </div>
-            
-            {/* Desktop: Static title */}
-            <h2 className="hidden md:block text-lg font-semibold">
-              {selectedMailbox.charAt(0).toUpperCase() + selectedMailbox.slice(1)}
-            </h2>
-            <div className="flex items-center gap-2">
-              {/* Select all checkbox - luôn hiển thị */}
-              <input
-                type="checkbox"
-                className="w-4 h-4 cursor-pointer hidden md:block"
-                checked={!!(emails && selectedEmails.size > 0 && selectedEmails.size === emails.filter((email: any) => {
-                  if (selectedMailbox === 'starred') return starredState[email.id];
-                  return true;
-                }).length)}
-                onChange={handleToggleSelectAll}
-                title={selectedEmails.size > 0 ? `${selectedEmails.size} selected` : 'Chọn tất cả'}
-                aria-label={selectedEmails.size > 0 ? `Bỏ chọn tất cả ${selectedEmails.size} email đã chọn` : 'Chọn tất cả email'}
-              />
-              <FiMoreVertical className="cursor-pointer text-gray-600" />
-            </div>
-          </div>
-          
-          {/* Select all checkbox - mobile only, luôn hiển thị */}
-          <div className="flex items-center gap-3 px-4 py-2 border-t md:hidden">
-            <input
-              type="checkbox"
-              className="w-4 h-4 cursor-pointer"
-              checked={!!(emails && selectedEmails.size > 0 && selectedEmails.size === emails.filter((email: any) => {
-                if (selectedMailbox === 'starred') return starredState[email.id];
-                return true;
-              }).length)}
-              onChange={handleToggleSelectAll}
-              aria-label={selectedEmails.size > 0 ? `Bỏ chọn tất cả ${selectedEmails.size} email đã chọn` : 'Chọn tất cả email'}
-            />
-            <span className="text-sm text-gray-600">
-              {selectedEmails.size > 0 ? `${selectedEmails.size} selected` : 'Chọn tất cả'}
-            </span>
-          </div>
-        </div>
-        
-        {/* Email list content with overflow */}
-        <div ref={emailListRef} className="flex-1">
-        {emailsLoading ? (
-          <div className="center-spinner">
-            <div className="spinner"></div>
-          </div>
-        ) : emailsError ? (
-          <div>Error loading emails</div>
-        ) : (
-          <div className="h-full">
-            <FixedSizeList
-              height={listHeight}
-              itemCount={emails?.filter((email: any) => {
-                if (selectedMailbox === 'starred') {
-                  if (!starredState[email.id]) return false;
-                }
-                // Áp dụng read filter
-                if (readFilter === 'read' && !email.read) return false;
-                if (readFilter === 'unread' && email.read) return false;
-                return true;
-              }).length || 0}
-              itemSize={110}
-              width="100%"
-              itemData={{
-                emails: emails?.filter((email: any) => {
-                  if (selectedMailbox === 'starred') {
-                    if (!starredState[email.id]) return false;
-                  }
-                  // Áp dụng read filter
-                  if (readFilter === 'read' && !email.read) return false;
-                  if (readFilter === 'unread' && email.read) return false;
-                  return true;
-                }),
-                selectedEmail,
-                selectedMailbox,
-                selectedEmails,
-                starredState,
-                showCheckboxes,
-                handleToggleCheckbox,
-                handleEmailSelect,
-                handleToggleRead,
-                handleToggleStar,
+
+            {/* ===== ACTION BAR ===== */}
+            <div
+              className="flex justify-between items-center pl-4 pr-2 py-2 border-b"
+              style={{
+                borderColor: 'var(--border-primary)',
+                backgroundColor: 'var(--bg-primary)'
               }}
             >
-              {EmailRow}
-            </FixedSizeList>
-          </div>
-        )}
-        </div>
-      </div>
 
-      {/* Divider 2 */}
-      <div
-        className="hidden md:block w-1 bg-gray-300 hover:bg-blue-500 cursor-col-resize"
-        onMouseDown={handleMouseDown(2)}
-      />
+              {/* ===== LEFT (mobile only): Mailbox dropdown ===== */}
+              <div className="md:hidden relative">
+                <button
+                  onClick={() => setShowMailboxMenu(!showMailboxMenu)}
+                  className="flex items-center gap-2 text-lg font-semibold hover:text-blue-600"
+                >
+                  <span>{currentMailboxLabel}</span>
+                  <IoIosArrowDown className="text-gray-600" />
+                </button>
 
-      {/* Column 3: Email Detail - Show on mobile only when email selected */}
-      <div
-        className={`flex flex-col overflow-hidden w-full ${
-          mobileView === 'emails' ? 'hidden md:flex' : 'flex'
-        }`}
-        style={{ width: window.innerWidth >= 768 ? `${100 - mailboxWidth - emailListWidth}%` : undefined }}
-      >
-        <div className="flex-shrink-0 p-4 pb-0">
-        <button
-          className="md:hidden mb-4 flex items-center gap-2 text-blue-600 hover:text-blue-700 font-medium px-3 py-2 rounded hover:bg-blue-50"
-          onClick={() => setMobileView('emails')}
-          aria-label="Back to email list"
-        >
-          <span className="text-xl">←</span>
-          <span>Back to emails</span>
-        </button>
-        </div>
-        
-        {/* Email detail content with overflow */}
-        <div className="flex-1 overflow-y-auto px-4 pb-4">
-        {emailLoading ? (
-          <div className="center-spinner">
-            <div className="spinner"></div>
-          </div>
-        ) : emailError ? (
-          <div>Error loading email</div>
-        ) : email ? (
-          <div>
-            {/* Subject Header - Separate box */}
-            <div className="mb-4 p-4 bg-gray-50 rounded border border-gray-200">
-              <h2 className="text-xl font-semibold">{email.subject}</h2>
-            </div>
-            
-            {/* Main email content box - includes sender info, actions, body, attachments */}
-            <div className="bg-white border border-gray-200 rounded">
-              {/* Email metadata with actions */}
-              <div className="p-4 pb-4">
-                <div className="flex items-start justify-between gap-4">
-                  {/* Left side: Avatar + Sender info */}
-                  <div className="flex items-start flex-1 min-w-0">
-                    <div className={`w-10 h-10 rounded-full flex-shrink-0 mr-3 flex items-center justify-center font-bold text-white ${getAvatarColor(email.from)}`}>
-                      {email.from.charAt(0).toUpperCase()}
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <div className="font-semibold text-base">{email.from}</div>
-                      <div className="text-sm text-gray-600 mt-1">
-                        <span className="font-medium">Tới:</span> {email.to}
-                      </div>
-                      {email.cc && (
-                        <div className="text-sm text-gray-600">
-                          <span className="font-medium">Cc:</span> {email.cc}
-                        </div>
-                      )}
-                      {email.bcc && (
-                        <div className="text-sm text-gray-600">
-                          <span className="font-medium">Bcc:</span> {email.bcc}
-                        </div>
-                      )}
-                      <div className="text-xs text-gray-500 mt-2">
-                        {(() => {
-                          const date = new Date(email.received);
-                          const weekday = date.toLocaleString('vi-VN', { weekday: 'short' }).replace(/^\w/, c => c.toUpperCase());
-                          const dateTime = date.toLocaleString('vi-VN', {
-                            day: 'numeric',
-                            month: 'numeric',
-                            year: 'numeric',
-                            hour: 'numeric',
-                            minute: '2-digit',
-                            hour12: true
-                          });
-                          return `${weekday}, ${dateTime}`;
-                        })()}
-                      </div>
-                    </div>
-                  </div>
-                  
-                  {/* Right side: Action buttons */}
-                  <div className="flex items-center gap-1 flex-shrink-0">
-                    <button 
-                      onClick={handleReply}
-                      className="p-2 hover:bg-gray-100 rounded"
-                      title="Trả lời"
-                      onMouseEnter={() => setIsReplyHoveredDetail(true)}
-                      onMouseLeave={() => setIsReplyHoveredDetail(false)}
-                    >
-                      <ArrowReply20Regular className={isReplyHoveredDetail ? "text-blue-600" : "text-gray-600"} />
-                    </button>
-                    <button 
-                      onClick={handleReplyAll}
-                      className="p-2 hover:bg-gray-100 rounded"
-                      title="Trả lời tất cả"
-                      onMouseEnter={() => setIsReplyAllHoveredDetail(true)}
-                      onMouseLeave={() => setIsReplyAllHoveredDetail(false)}
-                    >
-                      <ArrowReplyAll20Regular className={isReplyAllHoveredDetail ? "text-blue-600" : "text-gray-600"} />
-                    </button>
-                    <button 
-                      onClick={handleForward}
-                      className="p-2 hover:bg-gray-100 rounded"
-                      title="Chuyển tiếp"
-                      onMouseEnter={() => setIsForwardHoveredDetail(true)}
-                      onMouseLeave={() => setIsForwardHoveredDetail(false)}
-                    >
-                      <ArrowForward20Regular className={isForwardHoveredDetail ? "text-blue-600" : "text-gray-600"} />
-                    </button>
-                    
-                    <div className="h-6 w-px bg-gray-300 mx-1" />
-                    
-                    <button 
-                      onClick={() => handleToggleRead(email.id)}
-                      className="p-2 hover:bg-gray-100 rounded"
-                      title={email.read ? "Đánh dấu chưa đọc" : "Đánh dấu đã đọc"}
-                      onMouseEnter={() => setIsMailHoveredDetail(true)}
-                      onMouseLeave={() => setIsMailHoveredDetail(false)}
-                    >
-                      {email.read ? (
-                        isMailHoveredDetail ? <TbMailFilled className="w-5 h-5" /> : <LuMail className="w-5 h-5" />
-                      ) : (
-                        isMailHoveredDetail ? <TbMailOpenedFilled className="w-5 h-5" /> : <LuMailOpen className="w-5 h-5" />
-                      )}
-                    </button>
-                    <button 
-                      onClick={() => handleToggleStar(email.id)}
-                      className="p-2 hover:bg-gray-100 rounded"
-                      title={starredState[email.id] ? "Bỏ gắn sao" : "Gắn sao"}
-                      onMouseEnter={() => setIsStarHoveredDetail(true)}
-                      onMouseLeave={() => setIsStarHoveredDetail(false)}
-                    >
-                      {starredState[email.id] || isStarHoveredDetail ? (
-                        <FaStar className="w-5 h-5 text-yellow-400" />
-                      ) : (
-                        <FaRegStar className="w-5 h-5 text-gray-600" />
-                      )}
-                    </button>
-                    
-                    {/* Archive Button */}
-                    <button 
-                      onClick={() => handleArchiveEmail(email.id)}
-                      className="p-2 hover:bg-gray-100 rounded"
-                      title="Lưu trữ"
-                      onMouseEnter={() => setIsArchiveHoveredDetail(true)}
-                      onMouseLeave={() => setIsArchiveHoveredDetail(false)}
-                    >
-                      <FolderArrowRight20Regular className={isArchiveHoveredDetail ? "text-blue-600" : "text-gray-600"} />
-                    </button>
-                    
-                    {/* Delete Button */}
-                    <button 
-                      onClick={() => handleDeleteEmail(email.id)}
-                      className="p-2 hover:bg-gray-100 rounded"
-                      title="Xóa"
-                      onMouseEnter={() => setIsDeleteHoveredDetail(true)}
-                      onMouseLeave={() => setIsDeleteHoveredDetail(false)}
-                    >
-                      <FiTrash2 className={`w-5 h-5 ${isDeleteHoveredDetail ? "text-red-600" : "text-gray-600"}`} />
-                    </button>
-                    
-                    {/* More Menu with Delete */}
-                    <div className="relative">
-                      <button 
-                        onClick={() => setShowMoreMenu(!showMoreMenu)}
-                        className="p-2 hover:bg-gray-100 rounded" 
-                        title="Thêm"
-                      >
-                        <FiMoreVertical className="w-5 h-5" />
-                      </button>
-                      
-                      {showMoreMenu && (
-                        <>
-                          {/* Overlay để đóng menu khi click bên ngoài */}
-                          <div 
-                            className="fixed inset-0 z-10" 
-                            onClick={() => setShowMoreMenu(false)}
-                          ></div>
-                          
-                          {/* Dropdown Menu */}
-                          <div className="absolute right-0 mt-1 w-48 bg-white border border-gray-200 rounded shadow-lg z-20">
-
-                          </div>
-                        </>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              {/* Email body */}
-              <div className="p-6 pt-4">
-                <div
-                  className="email-body prose max-w-none mb-4"
-                  dangerouslySetInnerHTML={{ __html: email.body }}
-                />
-
-                {/* Attachments */}
-                {email.attachments && email.attachments.length > 0 && (
-                  <div className="mt-4 pt-4 border-t">
-                    <h3 className="text-sm font-semibold mb-3">
-                      Tệp đính kèm ({email.attachments.length})
-                    </h3>
-                    <div className="space-y-2">
-                      {email.attachments.map((attachment: any, index: number) => (
-                        <div
-                          key={index}
-                          className="flex items-center justify-between p-3 bg-gray-50 border rounded hover:bg-gray-100"
-                        >
-                          <div className="flex items-center gap-2 min-w-0">
-                            <FiFileText className="text-gray-500 flex-shrink-0" size={20} />
-                            <div className="truncate">
-                              <div className="text-sm font-medium truncate">{attachment.filename}</div>
-                              <div className="text-xs text-gray-500">{Math.round(attachment.size / 1024)} KB</div>
-                            </div>
-                          </div>
+                {showMailboxMenu && (
+                  <>
+                    <div
+                      className="fixed inset-0 z-10"
+                      onClick={() => setShowMailboxMenu(false)}
+                    />
+                    <div className="absolute left-0 top-full mt-2 w-56 bg-white border border-gray-200 rounded-lg shadow-lg z-20 max-h-96 overflow-y-auto">
+                      {mailboxes
+                        ?.filter((mailbox: any) => {
+                          const allowed = ["INBOX", "STARRED", "SENT", "DRAFT", "SPAM", "ALL_MAIL"];
+                          return allowed.includes(mailbox.id) || !mailbox.id.startsWith("CATEGORY_");
+                        })
+                        .map((mailbox: any) => (
                           <button
-                            className="px-3 py-1 text-sm bg-blue-500 text-white rounded hover:bg-blue-600 disabled:bg-gray-400"
-                            onClick={() => handleDownloadAttachment(email.id, attachment)}
-                            disabled={downloadingAttachments.has(attachment.attachmentId)}
+                            key={mailbox.id}
+                            onClick={() => {
+                              handleMailboxSelect(mailbox.id);
+                              setShowMailboxMenu(false);
+                            }}
+                            className={`w-full text-left px-4 py-3 hover:bg-gray-100 flex items-center justify-between border-b last:border-b-0 ${selectedMailbox === mailbox.id
+                              ? "bg-blue-50 text-blue-600"
+                              : ""
+                              }`}
                           >
-                            {downloadingAttachments.has(attachment.attachmentId) ? 'Đang tải...' : 'Tải xuống'}
+                            <div className="flex items-center gap-3 min-w-0">
+                              <span className="text-lg">{getMailboxIcon(mailbox)}</span>
+                              <span className="flex-1 min-w-0 truncate">
+                                {getMailboxLabel(mailbox)}
+                              </span>
+                            </div>
                           </button>
-                        </div>
-                      ))}
+                        ))}
                     </div>
-                  </div>
+                  </>
                 )}
               </div>
-            </div>
-          </div>
-        ) : (
-          <div className="flex flex-col items-center justify-center h-full text-gray-500">
-            <img 
-              src="https://res.public.onecdn.static.microsoft/assets/mail/illustrations/noMailSelected/v2/light.svg" 
-              alt="No email selected" 
-              style={{ width: '200px', height: '200px' }}
-              className="mb-4"
-            />
-            <p className="text-lg font-medium text-gray-700">Select an email to view details</p>
-            <p className="text-sm text-gray-500 mt-2">Choose a message from the list to read</p>
-          </div>
-        )}
-        </div>
-      </div>
-      
-      {/* Compose Modal */}
-      {showComposeModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50" onClick={() => setShowComposeModal(false)}>
-          <div className="bg-white rounded-lg shadow-xl w-full max-w-2xl mx-4" onClick={(e) => e.stopPropagation()}>
-            <div className="flex justify-between items-center p-4 border-b">
-              <h3 className="text-lg font-semibold">Thư mới</h3>
-              <button onClick={() => setShowComposeModal(false)} className="text-gray-500 hover:text-gray-700">
-                ✕
-              </button>
-            </div>
-            <div className="p-4">
-              <div className="mb-3">
-                <div className="flex justify-between items-center mb-1">
-                  <label className="block text-sm font-medium">Tới:</label>
-                  <div className="flex gap-2 text-xs">
-                    {!showCc && <button onClick={() => setShowCc(true)} className="text-blue-500 hover:underline">Cc</button>}
-                    {!showBcc && <button onClick={() => setShowBcc(true)} className="text-blue-500 hover:underline">Bcc</button>}
-                  </div>
-                </div>
-                <input 
-                  type="email" 
-                  className="w-full border rounded px-3 py-2" 
-                  placeholder="email@example.com"
-                  value={composeTo}
-                  onChange={(e) => setComposeTo(e.target.value)}
-                />
+
+              {/* ===== CENTER: Title + Refresh (desktop) ===== */}
+              <div className="hidden md:flex items-center gap-0">
+                <h2
+                  className="text-lg font-semibold"
+                  style={{ color: 'var(--text-primary)' }}
+                >
+                  {currentMailboxLabel}
+                </h2>
+
+                <button
+                  className="w-9 h-9 flex items-center justify-center rounded-lg transition-all translate-y-[1px]"
+                  onClick={() => handleRefresh()}
+                  title="Làm mới"
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.backgroundColor = 'var(--bg-hover)';
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.backgroundColor = 'transparent';
+                  }}
+                >
+                  <span
+                    className="material-symbols-outlined"
+                    style={{ color: 'var(--text-primary)', fontSize: '20px' }}
+                  >
+                    refresh
+                  </span>
+                </button>
               </div>
-              
-              {showCc && (
-                <div className="mb-3">
-                  <label className="block text-sm font-medium mb-1">Cc:</label>
-                  <input 
-                    type="email" 
-                    className="w-full border rounded px-3 py-2" 
-                    placeholder="email@example.com"
-                    value={composeCc}
-                    onChange={(e) => setComposeCc(e.target.value)}
-                  />
+
+              {/* ===== RIGHT: ACTION BUTTONS ===== */}
+              <div className="flex items-center gap-0">
+
+                {/* GROUP A: Select All + Refresh (mobile hidden) */}
+                <div className="hidden md:flex items-center gap-1.5">
+
+                  {/* SELECT ALL */}
+                  <button
+                    className="w-9 h-9 flex items-center justify-center rounded-lg transition-all"
+                    title="Chọn tất cả"
+                    onClick={handleToggleSelectAll}
+                    onMouseEnter={(e) => {
+                      e.currentTarget.style.backgroundColor = 'var(--bg-hover)';
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.backgroundColor = 'transparent';
+                    }}
+                  >
+                    <input
+                      type="checkbox"
+                      className="w-4 h-4 cursor-pointer accent-blue-600"
+                      checked={
+                        paginatedEmails.length > 0 &&
+                        selectedEmails.size === paginatedEmails.length
+                      }
+                      onChange={handleToggleSelectAll}
+                    />
+                  </button>
+
                 </div>
-              )}
-              
-              {showBcc && (
-                <div className="mb-3">
-                  <label className="block text-sm font-medium mb-1">Bcc:</label>
-                  <input 
-                    type="email" 
-                    className="w-full border rounded px-3 py-2" 
-                    placeholder="email@example.com"
-                    value={composeBcc}
-                    onChange={(e) => setComposeBcc(e.target.value)}
-                  />
-                </div>
-              )}
-              
-              <div className="mb-3">
-                <label className="block text-sm font-medium mb-1">Chủ đề:</label>
-                <input 
-                  type="text" 
-                  className="w-full border rounded px-3 py-2" 
-                  placeholder="Nhập chủ đề..."
-                  value={composeSubject}
-                  onChange={(e) => setComposeSubject(e.target.value)}
-                />
-              </div>
-              
-              <div className="mb-3">
-                <label className="block text-sm font-medium mb-1">Nội dung:</label>
-                <textarea 
-                  className="w-full border rounded px-3 py-2" 
-                  rows={6} 
-                  placeholder="Nhập nội dung email..."
-                  value={composeBody}
-                  onChange={(e) => setComposeBody(e.target.value)}
-                ></textarea>
-              </div>
-              
-              <div className="mb-3">
-                <label className="block text-sm font-medium mb-1">Tập đính kèm:</label>
-                <input 
-                  type="file" 
-                  multiple
-                  className="w-full border rounded px-3 py-2"
-                  onChange={(e) => {
-                    if (e.target.files) {
-                      setComposeAttachments(Array.from(e.target.files));
+
+                {/* GROUP B: Mark Read/Unread */}
+                <button
+                  className="w-9 h-9 flex items-center justify-center rounded-lg transition-all"
+                  style={{
+                    opacity: selectedEmails.size === 0 && !selectedEmail ? 0.4 : 1,
+                    cursor: selectedEmails.size === 0 && !selectedEmail ? 'not-allowed' : 'pointer',
+                  }}
+                  disabled={selectedEmails.size === 0 && !selectedEmail}
+                  title="Đánh dấu đã đọc / chưa đọc"
+                  onMouseEnter={(e) => {
+                    if (selectedEmails.size > 0 || selectedEmail) {
+                      e.currentTarget.style.backgroundColor = 'var(--bg-hover)';
                     }
                   }}
-                  aria-label="Tệp đính kèm"
-                />
-                {composeAttachments.length > 0 && (
-                  <div className="mt-2 space-y-1">
-                    {composeAttachments.map((file, idx) => (
-                      <div key={idx} className="flex items-center justify-between bg-gray-50 px-3 py-2 rounded text-sm">
-                        <span className="truncate">{file.name} ({(file.size / 1024).toFixed(1)} KB)</span>
-                        <button 
-                          onClick={() => setComposeAttachments(prev => prev.filter((_, i) => i !== idx))}
-                          className="text-red-500 hover:text-red-700 ml-2"
-                        >
-                          ✕
-                        </button>
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.backgroundColor = 'transparent';
+                  }}
+                  onClick={() => {
+                    const targets =
+                      selectedEmails.size > 0
+                        ? Array.from(selectedEmails)
+                        : selectedEmail
+                          ? [selectedEmail]
+                          : [];
+
+                    if (targets.length === 0) return;
+
+                    const hasUnread = targets.some((id) => {
+                      const email = emails.find((e: any) => e.id === id);
+                      return email && !email.read;
+                    });
+
+                    handleBulkMarkRead(hasUnread);
+                  }}
+                >
+                  <span className="material-symbols-outlined">
+                    {(() => {
+                      const targets =
+                        selectedEmails.size > 0
+                          ? Array.from(selectedEmails)
+                          : selectedEmail
+                            ? [selectedEmail]
+                            : [];
+
+                      const unread = targets.some((id) => {
+                        const email = emails.find((e: any) => e.id === id);
+                        return email && !email.read;
+                      });
+
+                      return unread ? "mark_email_read" : "mark_email_unread";
+                    })()}
+                  </span>
+                </button>
+
+                {/* GROUP C: Delete */}
+                <button
+                  className="w-9 h-9 flex items-center justify-center rounded-lg disabled:opacity-40"
+                  disabled={!selectedEmail && selectedEmails.size === 0}
+                  title="Xóa email"
+                  onClick={() => {
+                    if (selectedEmails.size === 0 && !selectedEmail) return;
+                    // Không cần xác nhận khi xóa ngoài thùng rác, xác nhận đã xử lý ở EmailDetail
+
+                    if (selectedEmails.size > 0) {
+                      selectedEmails.forEach((id) => handleDeleteEmail(id));
+                      setSelectedEmails(new Set());
+                      setShowCheckboxes(false);
+                    } else {
+                      handleDeleteEmail(selectedEmail || undefined);
+                      setSelectedEmail(null);
+                    }
+                  }}
+                >
+                  <span className="material-symbols-outlined">delete</span>
+                </button>
+
+                {/* GROUP D: Spam */}
+                <button
+                  className="w-9 h-9 flex items-center justify-center rounded-lg disabled:opacity-40"
+                  disabled={!selectedEmail && selectedEmails.size === 0}
+                  title="Báo cáo spam"
+                  onClick={async () => {
+                    if (!confirm("Báo cáo thư spam?")) return;
+
+                    const targets =
+                      selectedEmails.size > 0
+                        ? Array.from(selectedEmails)
+                        : selectedEmail
+                          ? [selectedEmail]
+                          : [];
+
+                    for (const id of targets) await handleMarkSpam(id);
+
+                    setSelectedEmails(new Set());
+                    setShowCheckboxes(false);
+                    setSelectedEmail(null);
+                  }}
+                >
+                  <span className="material-symbols-outlined">report</span>
+                </button>
+
+                {/* GROUP E: Move To */}
+                <div className="relative">
+                  <button
+                    className="w-9 h-9 flex items-center justify-center rounded-lg hover:bg-gray-200 disabled:opacity-40"
+                    disabled={!selectedEmail && selectedEmails.size === 0}
+                    title="Chuyển đến..."
+                    onClick={() => setShowMoveToMenu((p) => !p)}
+                  >
+                    <span className="material-symbols-outlined">
+                      drive_file_move
+                    </span>
+                  </button>
+
+                  {showMoveToMenu && (
+                    <>
+                      <div
+                        className="fixed inset-0 z-10"
+                        onClick={() => setShowMoveToMenu(false)}
+                      />
+                      <div className="absolute right-0 mt-2 w-52 shadow-lg border rounded z-20">
+                        {(() => {
+                          let emailObj = null;
+                          if (selectedEmail && emails)
+                            emailObj = emails.find((e: any) => e.id === selectedEmail);
+                          else if (selectedEmails.size > 0 && emails) {
+                            const first = Array.from(selectedEmails)[0];
+                            emailObj = emails.find((e: any) => e.id === first);
+                          }
+
+                          let allowedTargets: string[] = [];
+                          if (emailObj) {
+                            const labelIds = emailObj.labelIds || [];
+                            const isSpam = labelIds.includes("SPAM");
+                            const isTrash = labelIds.includes("TRASH");
+
+                            if (isSpam) allowedTargets = ["INBOX", "TRASH"];
+                            else if (isTrash) allowedTargets = ["INBOX", "SPAM"];
+                            else allowedTargets = ["TRASH", "SPAM"];
+                          }
+
+                          return mailboxes
+                            ?.filter((mb: any) => allowedTargets.includes(mb.id))
+                            .map((mb: any) => (
+                              <button
+                                key={mb.id}
+                                className="w-full text-left px-4 py-2 hover:bg-gray-100 flex items-center gap-2"
+                                onClick={() => handleMoveTo(mb.id)}
+                              >
+                                {getMailboxIcon(mb)}
+                                <span>{getMailboxLabel(mb)}</span>
+                              </button>
+                            ));
+                        })()}
                       </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-              <div className="flex justify-end gap-2">
-                <button onClick={() => setShowComposeModal(false)} className="px-4 py-2 border rounded hover:bg-gray-100">
-                  Hủy
-                </button>
-                <button onClick={handleSendEmail} className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600">
-                  Gửi
-                </button>
+                    </>
+                  )}
+                </div>
+
               </div>
             </div>
+
+
+            {/* Mobile select-all */}
+            <div
+              className="flex items-center gap-3 px-3 py-2 border-t md:hidden"
+              style={{
+                borderColor: 'var(--border-primary)',
+                backgroundColor: 'var(--bg-primary)'
+              }}
+            >
+              <input
+                type="checkbox"
+                className="w-4 h-4 cursor-pointer"
+                checked={
+                  paginatedEmails.length > 0 &&
+                  selectedEmails.size === paginatedEmails.length
+                }
+                onChange={handleToggleSelectAll}
+              />
+              <span className="text-sm text-gray-600">
+                {selectedEmails.size > 0
+                  ? `${selectedEmails.size} selected`
+                  : "Chọn tất cả"}
+              </span>
+            </div>
           </div>
-        </div>
-      )}
-      
-      {/* Keyboard Shortcuts Help Modal */}
-      {showKeyboardHelp && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50" onClick={() => setShowKeyboardHelp(false)}>
-          <div className="bg-white rounded-lg shadow-xl w-full max-w-md mx-4 p-6" onClick={(e) => e.stopPropagation()}>
-            <div className="flex justify-between items-center mb-4">
-              <h3 className="text-xl font-semibold">Keyboard Shortcuts</h3>
-              <button onClick={() => setShowKeyboardHelp(false)} className="text-gray-500 hover:text-gray-700 text-2xl">
-                ✕
+
+          {/* ===== EMAIL LIST ===== */}
+          <div className="flex flex-col h-full">
+            <div ref={emailListRef} className="flex-1">
+              {emailsLoading ? (
+                <div className="center-spinner">
+                  <div className="spinner" />
+                </div>
+              ) : emailsError ? (
+                <div>Error loading emails</div>
+              ) : (
+                <EmailList
+                  ref={emailListComponentRef}
+                  emails={paginatedEmails}
+                  selectedEmail={selectedEmail}
+                  selectedEmails={selectedEmails}
+                  starredState={starredState}
+                  readState={readState}
+                  showCheckboxes={showCheckboxes}
+                  handleToggleCheckbox={handleToggleCheckbox}
+                  handleEmailSelect={handleEmailSelect}
+                  handleToggleRead={handleToggleRead}
+                  handleToggleStar={handleToggleStar}
+                  focusedEmailIndex={focusedEmailIndex}
+                  user={user}
+                  listHeight={listHeight}
+                />
+              )}
+            </div>
+
+            {/* Pagination */}
+            <div
+              className="flex items-center text-xs justify-end px-3 border-t "
+              style={{
+                color: 'var(--text-secondary)',
+                backgroundColor: 'var(--bg-primary)',
+                borderColor: 'var(--border-primary)',
+              }}
+            >
+              <span className="mr-4">
+                {filteredEmails.length === 0
+                  ? "0"
+                  : `${startIndex + 1}–${Math.min(
+                    startIndex + pageSize,
+                    filteredEmails.length
+                  )} trong ${filteredEmails.length}`}
+              </span>
+
+              <button
+                className="px-2 py-1.5 transition-all font-base text-gray-700 text-lg" // <-- text-lg tăng chữ
+                style={{
+                  opacity: safeCurrentPage <= 1 ? 0.4 : 1,
+                  cursor: safeCurrentPage <= 1 ? 'not-allowed' : 'pointer',
+                }}
+                disabled={safeCurrentPage <= 1}
+                onClick={() => {
+                  setCurrentPage((p) => Math.max(1, p - 1));
+                  setFocusedEmailIndex(0);
+                }}
+                onMouseEnter={(e) => {
+                  if (safeCurrentPage > 1) {
+                    e.currentTarget.style.backgroundColor = 'var(--bg-hover)';
+                  }
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.backgroundColor = 'transparent';
+                }}
+              >
+                ‹
+              </button>
+
+              <button
+                className="ml-1.5 px-3 rounded-lg transition-all font-medium text-lg" // <-- text-lg tăng chữ
+                style={{
+                  opacity: safeCurrentPage >= totalPages ? 0.3 : 1,
+                  cursor: safeCurrentPage >= totalPages ? 'not-allowed' : 'pointer',
+                }}
+                disabled={safeCurrentPage >= totalPages}
+                onClick={() => {
+                  setCurrentPage((p) => Math.min(totalPages, p + 1));
+                  setFocusedEmailIndex(0);
+                }}
+                onMouseEnter={(e) => {
+                  if (safeCurrentPage < totalPages) {
+                    e.currentTarget.style.backgroundColor = 'var(--bg-hover)';
+                  }
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.backgroundColor = 'transparent';
+                }}
+              >
+                ›
               </button>
             </div>
-            <div className="space-y-3 text-sm">
-              <div className="flex justify-between py-2 border-b">
-                <span className="text-gray-600">Navigate emails</span>
-                <kbd className="px-2 py-1 bg-gray-100 rounded text-xs font-mono">↑ / ↓</kbd>
-              </div>
-              <div className="flex justify-between py-2 border-b">
-                <span className="text-gray-600">Open email</span>
-                <kbd className="px-2 py-1 bg-gray-100 rounded text-xs font-mono">Enter</kbd>
-              </div>
-              <div className="flex justify-between py-2 border-b">
-                <span className="text-gray-600">Compose new email</span>
-                <kbd className="px-2 py-1 bg-gray-100 rounded text-xs font-mono">Ctrl + C</kbd>
-              </div>
-              <div className="flex justify-between py-2 border-b">
-                <span className="text-gray-600">Refresh</span>
-                <kbd className="px-2 py-1 bg-gray-100 rounded text-xs font-mono">Ctrl + R</kbd>
-              </div>
-              <div className="flex justify-between py-2 border-b">
-                <span className="text-gray-600">Toggle star</span>
-                <kbd className="px-2 py-1 bg-gray-100 rounded text-xs font-mono">Ctrl + S</kbd>
-              </div>
-              <div className="flex justify-between py-2 border-b">
-                <span className="text-gray-600">Toggle read/unread</span>
-                <kbd className="px-2 py-1 bg-gray-100 rounded text-xs font-mono">Ctrl + U</kbd>
-              </div>
-              <div className="flex justify-between py-2 border-b">
-                <span className="text-gray-600">Close / Go back</span>
-                <kbd className="px-2 py-1 bg-gray-100 rounded text-xs font-mono">Esc</kbd>
-              </div>
-              <div className="flex justify-between py-2">
-                <span className="text-gray-600">Show shortcuts</span>
-                <kbd className="px-2 py-1 bg-gray-100 rounded text-xs font-mono">Shift + ?</kbd>
-              </div>
-            </div>
+
           </div>
         </div>
-      )}
+
+
+        {/* Column 3: Email detail */}
+        <div
+          className={`flex flex-col overflow-hidden w-full ${mobileView === 'emails' ? 'hidden md:flex' : 'flex'
+            }`}
+          style={{
+            flex: 1,
+            backgroundColor: 'var(--bg-primary)',
+          }}
+        >
+          <div className="flex-shrink-0 p-3 pb-0">
+            <button
+              className="md:hidden mb-3 flex items-center gap-2 font-medium px-3 py-2 rounded transition-all"
+              style={{
+                color: 'var(--accent-primary)',
+                backgroundColor: 'transparent'
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.backgroundColor = 'var(--bg-secondary)';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.backgroundColor = 'transparent';
+              }}
+              onClick={() => setMobileView('emails')}
+              aria-label="Back to email list"
+            >
+              <span className="text-xl">←</span>
+              <span>Back to emails</span>
+            </button>
+          </div>
+
+          <div
+            className="flex-1 overflow-y-auto px-4 pb-4"
+            style={{ backgroundColor: 'var(--bg-primary)' }}
+          >
+            {emailLoading ? (
+              <div className="center-spinner">
+                <div className="spinner" />
+              </div>
+            ) : emailError ? (
+              <div>Error loading email</div>
+            ) : email ? (
+              <EmailDetail
+                email={email}
+                starredState={starredState}
+                isReplyHoveredDetail={isReplyHoveredDetail}
+                isReplyAllHoveredDetail={isReplyAllHoveredDetail}
+                isForwardHoveredDetail={isForwardHoveredDetail}
+                isMailHoveredDetail={isMailHoveredDetail}
+                isStarHoveredDetail={isStarHoveredDetail}
+                isDeleteHoveredDetail={isDeleteHoveredDetail}
+                downloadingAttachments={downloadingAttachments}
+                handleReply={handleReply}
+                handleReplyAll={handleReplyAll}
+                handleForward={handleForward}
+                handleToggleRead={handleToggleRead}
+                handleToggleStar={handleToggleStar}
+                handleDeleteEmail={handleDeleteEmail}
+                handleDownloadAttachment={handleDownloadAttachment}
+                setIsReplyHoveredDetail={setIsReplyHoveredDetail}
+                setIsReplyAllHoveredDetail={setIsReplyAllHoveredDetail}
+                setIsForwardHoveredDetail={setIsForwardHoveredDetail}
+                setIsMailHoveredDetail={setIsMailHoveredDetail}
+                setIsStarHoveredDetail={setIsStarHoveredDetail}
+                setIsDeleteHoveredDetail={setIsDeleteHoveredDetail}
+              />
+            ) : (
+              <div className="flex flex-col items-center justify-center h-full text-gray-500">
+                <img
+                  src="https://res.public.onecdn.static.microsoft/assets/mail/illustrations/noMailSelected/v2/light.svg"
+                  alt="No email selected"
+                  style={{ width: '200px', height: '200px' }}
+                  className="mb-4"
+                />
+                <p className="text-lg font-medium text-gray-700">
+                  Select an email to view details
+                </p>
+                <p className="text-sm text-gray-500 mt-2">
+                  Choose a message from the list to read
+                </p>
+              </div>
+            )}
+          </div>
+        </div>
       </div>
+
+      {/* Compose Modal */}
+      <ComposeModal
+        showComposeModal={showComposeModal}
+        setShowComposeModal={handleCloseCompose}
+        composeTo={composeTo}
+        setComposeTo={setComposeTo}
+        composeCc={composeCc}
+        setComposeCc={setComposeCc}
+        composeBcc={composeBcc}
+        setComposeBcc={setComposeBcc}
+        composeSubject={composeSubject}
+        setComposeSubject={setComposeSubject}
+        composeBody={composeBody}
+        setComposeBody={setComposeBody}
+        composeAttachments={composeAttachments}
+        setComposeAttachments={setComposeAttachments}
+        showCc={showCc}
+        setShowCc={setShowCc}
+        showBcc={showBcc}
+        setShowBcc={setShowBcc}
+        composeErrors={composeErrors}
+        setComposeErrors={setComposeErrors}
+        isSending={isSending}
+        handleSendEmail={handleSendEmail}
+      />
+
+      {/* Delete Confirmation Dialog */}
+      <ConfirmDialog
+        isOpen={showDeleteConfirm}
+        title="Xác nhận xóa"
+        message="Thư sẽ được xóa vĩnh viễn. Bạn chắc chắn muốn xóa nó chứ?"
+        confirmText="Xóa vĩnh viễn"
+        cancelText="Hủy"
+        onConfirm={handleConfirmDelete}
+        onCancel={handleCancelDelete}
+        isDangerous={true}
+      />
     </div>
   );
 }

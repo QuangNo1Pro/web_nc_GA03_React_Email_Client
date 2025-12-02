@@ -22,6 +22,21 @@ const processQueue = (error: any, token = null) => {
   failedQueue = [];
 };
 
+api.interceptors.request.use(
+  (config) => {
+    // Lấy token từ window hoặc localStorage
+    const token =
+      (window as any).__ACCESS_TOKEN__ ||
+      localStorage.getItem('access_token');
+    if (token) {
+      config.headers = config.headers || {};
+      config.headers['Authorization'] = `Bearer ${token}`;
+    }
+    return config;
+  },
+  (error) => Promise.reject(error)
+);
+
 api.interceptors.response.use(
   (response) => response,
   async (error) => {

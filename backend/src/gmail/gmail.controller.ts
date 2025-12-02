@@ -17,7 +17,7 @@ import { Request as ExpressRequest } from 'express';
 @Controller('gmail')
 @UseGuards(AuthGuard('jwt'))
 export class GmailController {
-  constructor(private readonly gmailService: GmailService) {}
+  constructor(private readonly gmailService: GmailService) { }
 
   @Get('mailboxes')
   getMailboxes(@Request() req: ExpressRequest) {
@@ -68,6 +68,19 @@ export class GmailController {
     );
   }
 
+  @Patch('emails/bulk-read')
+  async bulkSetRead(
+    @Request() req: ExpressRequest,
+    @Body('ids') ids: string[],
+    @Body('read') read: boolean,
+  ) {
+    return this.gmailService.bulkSetEmailRead(
+      (req.user as any).userId,
+      ids,
+      read,
+    );
+  }
+
   @Delete('emails/:messageId')
   deleteEmail(
     @Request() req: ExpressRequest,
@@ -90,7 +103,54 @@ export class GmailController {
     );
   }
 
+  @Patch('emails/:messageId/spam')
+moveToSpam(
+  @Request() req: ExpressRequest,
+  @Param('messageId') messageId: string,
+) {
+  return this.gmailService.moveEmailToSpam(
+    (req.user as any).userId,
+    messageId,
+  );
+}
 
+@Post("emails/:id/move")
+async moveEmail(
+  @Request() req: ExpressRequest,
+  @Param("id") id: string,
+  @Body() body: { label: string }
+) {
+  return this.gmailService.moveEmail(
+    (req.user as any).userId,
+    id,
+    body.label
+  );
+}
+
+@Post('draft')
+async saveDraft(
+  @Request() req: ExpressRequest,
+  @Body() body: {
+    to: string;
+    cc?: string;
+    bcc?: string;
+    subject: string;
+    body: string;
+    attachments?: { filename: string; mimeType: string; base64Content: string }[];
+  }
+) {
+  return this.gmailService.saveDraft(
+    (req.user as any).userId,
+    body.to,
+    body.subject,
+    body.body,
+    body.cc,
+    body.bcc,
+    body.attachments,
+  );
+}
+
+  @Post('send')
   sendEmail(
     @Request() req: ExpressRequest,
     @Body('to') to: string,
@@ -122,5 +182,10 @@ export class GmailController {
       messageId,
       attachmentId,
     );
+  }
+
+  @Post('refresh')
+  refreshMailboxesAndEmails(@Request() req: ExpressRequest) {
+    return this.gmailService.incrementalSync((req.user as any).userId);
   }
 }

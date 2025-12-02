@@ -30,8 +30,8 @@ export default function Login() {
   const mutation = useMutation<any, any, FormValues, unknown>({
     mutationFn: (data: FormValues) =>
       api.post('/auth/login', data).then((res) => res.data),
-    onSuccess: (data) => {
-      login();
+    onSuccess: async () => {
+      await login();
       setServerMessage('Đăng nhập thành công');
       setTimeout(() => navigate('/inbox'), 800);
     },
@@ -50,11 +50,11 @@ export default function Login() {
   };
 
   return (
-    <div className="flex min-h-screen">
-      <div className="flex-1 flex items-center justify-center p-12 bg-gray-50">
+    <div className="flex min-h-screen" style={{ backgroundColor: 'var(--bg-primary)' }}>
+      <div className="flex-1 flex items-center justify-center p-12" style={{ backgroundColor: 'var(--bg-secondary)' }}>
         <div className="max-w-md w-full">
           <div>
-            <h2 className="mt-6 text-center text-3xl font-extrabold text-gray-900">
+            <h2 className="mt-6 text-center text-3xl font-extrabold" style={{ color: 'var(--text-primary)' }}>
               Sign in to your account
             </h2>
           </div>
@@ -70,7 +70,12 @@ export default function Login() {
                   autoComplete="email"
                   required
                   {...register('email')}
-                  className="appearance-none rounded-none relative block w-full px-3 py-2 border border-gray-300 placeholder-gray-500 text-gray-900 rounded-t-md focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 focus:z-10 sm:text-sm"
+                  className="appearance-none rounded-none relative block w-full px-3 py-2 border rounded-t-md focus:outline-none focus:z-10 sm:text-sm"
+                  style={{
+                    backgroundColor: 'var(--bg-primary)',
+                    borderColor: 'var(--border-primary)',
+                    color: 'var(--text-primary)'
+                  }}
                   placeholder="Email address"
                 />
               </div>
@@ -84,7 +89,12 @@ export default function Login() {
                   autoComplete="current-password"
                   required
                   {...register('password')}
-                  className="appearance-none rounded-none relative block w-full px-3 py-2 border border-gray-300 placeholder-gray-500 text-gray-900 rounded-b-md focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 focus:z-10 sm:text-sm"
+                  className="appearance-none rounded-none relative block w-full px-3 py-2 border rounded-b-md focus:outline-none focus:z-10 sm:text-sm"
+                  style={{
+                    backgroundColor: 'var(--bg-primary)',
+                    borderColor: 'var(--border-primary)',
+                    color: 'var(--text-primary)'
+                  }}
                   placeholder="Password"
                 />
               </div>
@@ -105,8 +115,22 @@ export default function Login() {
             <div>
               <button
                 type="submit"
-                className="group relative w-full flex justify-center py-2 px-4 border border-transparent text-sm font-medium rounded-md text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"
+                className="group relative w-full flex justify-center py-2 px-4 border border-transparent text-sm font-medium rounded-md focus:outline-none"
+                style={{
+                  backgroundColor: 'var(--accent-primary)',
+                  color: 'white'
+                }}
                 disabled={mutation.isPending}
+                onMouseEnter={(e) => {
+                  if (!mutation.isPending) {
+                    e.currentTarget.style.backgroundColor = 'var(--accent-primary-hover)';
+                  }
+                }}
+                onMouseLeave={(e) => {
+                  if (!mutation.isPending) {
+                    e.currentTarget.style.backgroundColor = 'var(--accent-primary)';
+                  }
+                }}
               >
                 {mutation.isPending ? 'Signing in...' : 'Sign in'}
               </button>
@@ -115,10 +139,10 @@ export default function Login() {
           <div className="mt-6">
             <div className="relative">
               <div className="absolute inset-0 flex items-center">
-                <div className="w-full border-t border-gray-300" />
+                <div className="w-full border-t" style={{ borderColor: 'var(--border-primary)' }} />
               </div>
               <div className="relative flex justify-center text-sm">
-                <span className="px-2 bg-gray-50 text-gray-500">
+                <span className="px-2" style={{ backgroundColor: 'var(--bg-secondary)', color: 'var(--text-secondary)' }}>
                   Or continue with
                 </span>
               </div>
@@ -127,7 +151,18 @@ export default function Login() {
             <div className="mt-6">
               <button
                 onClick={handleGoogleLogin}
-                className="w-full inline-flex justify-center py-2 px-4 border border-gray-300 rounded-md shadow-sm bg-white text-sm font-medium text-gray-500 hover:bg-gray-50"
+                className="w-full inline-flex justify-center py-2 px-4 border rounded-md shadow-sm text-sm font-medium"
+                style={{
+                  backgroundColor: 'var(--bg-primary)',
+                  borderColor: 'var(--border-primary)',
+                  color: 'var(--text-secondary)'
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.backgroundColor = 'var(--bg-hover)';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.backgroundColor = 'var(--bg-primary)';
+                }}
               >
                 <span className="sr-only">Sign in with Google</span>
                 <svg
@@ -146,8 +181,8 @@ export default function Login() {
           </div>
         </div>
       </div>
-      <div className="hidden lg:flex flex-1 items-center justify-center bg-indigo-700">
-        <div className="max-w-md text-white text-center">
+      <div className="hidden lg:flex flex-1 items-center justify-center" style={{ backgroundColor: 'var(--accent-primary)' }}>
+        <div className="max-w-md text-center" style={{ color: 'white' }}>
           <h2 className="text-3xl font-bold">Welcome Back!</h2>
           <p className="mt-4">
             Sign in to access your account and continue your journey with us.

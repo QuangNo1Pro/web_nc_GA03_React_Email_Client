@@ -59,6 +59,7 @@ export class AuthController {
     return {
       status: 'success',
       message: 'Đăng nhập thành công',
+      access_token: tokens.access_token,
     };
   }
 
@@ -99,6 +100,7 @@ export class AuthController {
     return {
       status: 'success',
       message: 'Token refreshed successfully',
+      access_token: tokens.access_token,
     };
   }
 
@@ -134,8 +136,17 @@ export class AuthController {
 
   @UseGuards(AuthGuard('jwt'))
   @Get('profile')
-  getProfile(@Request() req: any) {
-    return req.user;
+  async getProfile(@Request() req: any) {
+    // Lấy user từ database để đảm bảo có avatar
+    const user = await this.usersService.findById(req.user.userId);
+    if (!user) {
+      return { error: 'User not found' };
+    }
+    return {
+      userId: user._id?.toString() || user.id,
+      email: user.email,
+      name: user.name,
+      picture: user.picture,
+    };
   }
 }
-

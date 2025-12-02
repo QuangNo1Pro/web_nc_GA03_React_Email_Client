@@ -12,7 +12,9 @@ body,
     Roboto, 'Helvetica Neue', Arial;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-  background-color: #f4f4f4;
+  background-color: var(--bg-primary);
+  color: var(--text-primary);
+  transition: background-color 0.2s ease, color 0.2s ease;
 }
 
 /* form input styling helper */
@@ -42,4 +44,121 @@ body,
 
 .center-spinner {
   @apply flex justify-center items-center h-full;
+}
+
+.material-symbols-outlined {
+  font-variation-settings:
+    'FILL' 0,
+    'wght' 400,
+    'GRAD' 0,
+    'opsz' 24;
+  vertical-align: middle;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 18px !important; /* 🔥 thu nhỏ icon */
+  line-height: 1;
+}
+
+.mailbox-unread-badge {
+  background: none !important;
+  color: inherit !important;
+  padding: 0 !important;
+  border-radius: 0 !important;
+  font-size: 14px;
+  font-weight: 500;
+}
+
+/* ===== Mailboxes Column – UI giống hình mẫu ===== */
+
+.mailbox-item {
+  display: flex;
+  align-items: center;
+  padding: 6px 10px;
+  border-radius: 6px;
+  margin-bottom: 2px;
+  cursor: pointer;
+  transition: background-color 0.15s;
+  font-size: 14px;
+  color: #333;
+  background: transparent; /* Default background */
+}
+
+.mailbox-item:hover {
+  background: #e5e8ec;
+}
+
+.mailbox-item.selected {
+  background: #dcecff;
+  color: #0b57d0;
+  font-weight: 600;
+}
+
+.mailbox-icon {
+  width: 18px;
+  height: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-right: 8px;
+}
+
+.mailbox-text {
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Unread count — chỉ số, không nền, không bo góc */
+.mailbox-count {
+  font-size: 13px;
+  font-weight: 500;
+  color: #0b57d0;
+  margin-left: 8px;
+}
+
+.dark .mailbox-item {
+  background: transparent;
+  color: #e5e7eb;
+}
+.dark .mailbox-item:hover {
+  background: #222a36;
+}
+.dark .mailbox-item.selected {
+  background: #0b57d0;
+  color: #fff;
+  font-weight: 600;
+}
+
+/* Dark mode input styling */
+.dark input[type="text"],
+.dark input[type="email"],
+.dark input[type="password"],
+.dark textarea {
+  background-color: var(--bg-secondary);
+  color: var(--text-primary);
+  border-color: var(--border-primary);
+}
+
+.dark input[type="text"]:focus,
+.dark input[type="email"]:focus,
+.dark input[type="password"]:focus,
+.dark textarea:focus {
+  border-color: var(--accent-primary);
+}
+
+/* Dark mode for checkboxes */
+.dark input[type="checkbox"] {
+  border-color: var(--border-secondary);
+}
+
+/* Smooth transitions */
+* {
+  transition: background-color 0.15s ease, border-color 0.15s ease;
+}
+
+button,
+a {
+  transition: all 0.15s ease;
 }

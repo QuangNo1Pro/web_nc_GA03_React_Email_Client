@@ -1,0 +1,296 @@
+/* ============================================
+   THEME SYSTEM - CSS VARIABLES
+   ============================================ */
+
+:root {
+  /* ===== LIGHT THEME ===== */
+  --bg-primary: #ffffff;
+  --bg-secondary: #f8f9fa;
+  --bg-tertiary: #f1f3f4;
+  --bg-hover: #f1f3f4;
+  --bg-active: #e8eaed;
+  --bg-selected: #e8f0fe;
+  
+  --text-primary: #202124;
+  --text-secondary: #5f6368;
+  --text-tertiary: #80868b;
+  --text-inverse: #ffffff;
+  
+  --border-primary: #e8eaed;
+  --border-secondary: #dadce0;
+  --border-focus: #1a73e8;
+  
+  --accent-primary: #1a73e8;
+  --accent-primary-hover: #1765cc;
+  --accent-secondary: #e8f0fe;
+  
+  --success: #1e8e3e;
+  --success-bg: #e6f4ea;
+  --warning: #f9ab00;
+  --warning-bg: #fef7e0;
+  --error: #d93025;
+  --error-bg: #fce8e6;
+  
+  --shadow-sm: 0 1px 2px 0 rgba(60, 64, 67, 0.1);
+  --shadow-md: 0 1px 3px 0 rgba(60, 64, 67, 0.15);
+  --shadow-lg: 0 4px 12px 0 rgba(60, 64, 67, 0.15);
+  --shadow-xl: 0 8px 24px 0 rgba(60, 64, 67, 0.2);
+  
+  --unread-marker: #1a73e8;
+  --star-color: #f9ab00;
+  --avatar-bg: #1a73e8;
+}
+
+.dark {
+  /* ===== DARK THEME ===== */
+  --bg-primary: #1f1f1f;
+  --bg-secondary: #2a2a2a;
+  --bg-tertiary: #323232;
+  --bg-hover: #2e2e2e;
+  --bg-active: #3a3a3a;
+  --bg-selected: #1e3a5f;
+  
+  --text-primary: #e8eaed;
+  --text-secondary: #9aa0a6;
+  --text-tertiary: #70757a;
+  --text-inverse: #202124;
+  
+  --border-primary: #3c4043;
+  --border-secondary: #5f6368;
+  --border-focus: #8ab4f8;
+  
+  --accent-primary: #8ab4f8;
+  --accent-primary-hover: #aecbfa;
+  --accent-secondary: #1e3a5f;
+  
+  --success: #81c995;
+  --success-bg: #1e3a2e;
+  --warning: #fdd663;
+  --warning-bg: #3a2e1e;
+  --error: #f28b82;
+  --error-bg: #3a1e1e;
+  
+  --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.3);
+  --shadow-md: 0 1px 3px 0 rgba(0, 0, 0, 0.4);
+  --shadow-lg: 0 4px 12px 0 rgba(0, 0, 0, 0.5);
+  --shadow-xl: 0 8px 24px 0 rgba(0, 0, 0, 0.6);
+  
+  --unread-marker: #8ab4f8;
+  --star-color: #fdd663;
+  --avatar-bg: #8ab4f8;
+}
+
+/* ============================================
+   BASE STYLES
+   ============================================ */
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  overflow: hidden;
+}
+
+body {
+  font-family: 'Google Sans', 'Roboto', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif;
+  background-color: var(--bg-primary);
+  color: var(--text-primary);
+  transition: background-color 0.25s ease, color 0.25s ease;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* ============================================
+   SMOOTH TRANSITIONS
+   ============================================ */
+
+.theme-transition {
+  transition: background-color 0.25s ease, 
+              color 0.25s ease, 
+              border-color 0.25s ease,
+              box-shadow 0.25s ease;
+}
+
+/* ============================================
+   ANIMATIONS
+   ============================================ */
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes slideInRight {
+  from {
+    transform: translateX(20px);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+@keyframes slideInUp {
+  from {
+    transform: translateY(10px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+@keyframes scaleIn {
+  from {
+    transform: scale(0.95);
+    opacity: 0;
+  }
+  to {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+@keyframes slideDown {
+  from {
+    opacity: 0;
+    max-height: 0;
+    transform: translateY(-10px);
+  }
+  to {
+    opacity: 1;
+    max-height: 200px;
+    transform: translateY(0);
+  }
+}
+
+.animate-fade-in {
+  animation: fadeIn 0.2s ease;
+}
+
+.animate-slide-in-right {
+  animation: slideInRight 0.3s ease;
+}
+
+.animate-slide-in-up {
+  animation: slideInUp 0.2s ease;
+}
+
+.animate-slide-down {
+  animation: slideDown 0.3s ease-out;
+}
+
+.animate-scale-in {
+  animation: scaleIn 0.15s ease;
+}
+
+/* ============================================
+   SCROLLBAR STYLING
+   ============================================ */
+
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--bg-secondary);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--border-secondary);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--text-tertiary);
+}
+
+/* ============================================
+   UTILITY CLASSES
+   ============================================ */
+
+.bg-primary {
+  background-color: var(--bg-primary);
+}
+
+.bg-secondary {
+  background-color: var(--bg-secondary);
+}
+
+.bg-tertiary {
+  background-color: var(--bg-tertiary);
+}
+
+.text-primary {
+  color: var(--text-primary);
+}
+
+.text-secondary {
+  color: var(--text-secondary);
+}
+
+.text-tertiary {
+  color: var(--text-tertiary);
+}
+
+.border-primary {
+  border-color: var(--border-primary);
+}
+
+.hover-bg:hover {
+  background-color: var(--bg-hover);
+}
+
+.active-bg:active {
+  background-color: var(--bg-active);
+}
+
+/* ============================================
+   FOCUS STYLES
+   ============================================ */
+
+button:focus-visible,
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible {
+  outline: 2px solid var(--accent-primary);
+  outline-offset: 2px;
+}
+
+/* ============================================
+   SKELETON LOADER
+   ============================================ */
+
+.skeleton {
+  background: linear-gradient(
+    90deg,
+    var(--bg-tertiary) 25%,
+    var(--bg-hover) 50%,
+    var(--bg-tertiary) 75%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.5s infinite;
+  border-radius: 4px;
+}
+
+@keyframes shimmer {
+  0% {
+    background-position: 200% 0;
+  }
+  100% {
+    background-position: -200% 0;
+  }
+}
