@@ -297,7 +297,7 @@ export default function Inbox() {
     selectedMailbox,
     starredState,
     readFilter,
-    50
+    20
   );
 
   // Email đang xem (detail) - merge readState override for consistent UI
@@ -1470,7 +1470,7 @@ export default function Inbox() {
                     handleBulkMarkRead(hasUnread);
                   }}
                 >
-                  <span className="material-symbols-outlined text-gray-700">
+                  <span className="material-symbols-outlined">
                     {(() => {
                       const targets =
                         selectedEmails.size > 0
@@ -1491,7 +1491,7 @@ export default function Inbox() {
 
                 {/* GROUP C: Delete */}
                 <button
-                  className="w-9 h-9 flex items-center justify-center rounded-lg hover:bg-red-100 disabled:opacity-40"
+                  className="w-9 h-9 flex items-center justify-center rounded-lg disabled:opacity-40"
                   disabled={!selectedEmail && selectedEmails.size === 0}
                   title="Xóa email"
                   onClick={() => {
@@ -1513,7 +1513,7 @@ export default function Inbox() {
 
                 {/* GROUP D: Spam */}
                 <button
-                  className="w-9 h-9 flex items-center justify-center rounded-lg hover:bg-yellow-100 disabled:opacity-40"
+                  className="w-9 h-9 flex items-center justify-center rounded-lg disabled:opacity-40"
                   disabled={!selectedEmail && selectedEmails.size === 0}
                   title="Báo cáo spam"
                   onClick={async () => {
@@ -1544,7 +1544,7 @@ export default function Inbox() {
                     title="Chuyển đến..."
                     onClick={() => setShowMoveToMenu((p) => !p)}
                   >
-                    <span className="material-symbols-outlined text-gray-700">
+                    <span className="material-symbols-outlined">
                       drive_file_move
                     </span>
                   </button>
@@ -1555,7 +1555,7 @@ export default function Inbox() {
                         className="fixed inset-0 z-10"
                         onClick={() => setShowMoveToMenu(false)}
                       />
-                      <div className="absolute right-0 mt-2 w-52 bg-white shadow-lg border rounded z-20">
+                      <div className="absolute right-0 mt-2 w-52 shadow-lg border rounded z-20">
                         {(() => {
                           let emailObj = null;
                           if (selectedEmail && emails)
