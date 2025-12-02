@@ -78,7 +78,7 @@
     ```
 4.  **Khởi động máy chủ phát triển:**
     ```sh
-    npm run start:dev
+    npm run dev
     ```
     Máy chủ backend sẽ chạy trên `http://localhost:3000`.
 
