@@ -40,17 +40,21 @@ export class AuthController {
   @Post('login')
   async login(@Request() req: any, @Res({ passthrough: true }) res: Response) {
     const tokens = await this.authService.login(req.user);
+    const isProduction = process.env.NODE_ENV === 'production';
+    
     res.cookie('access_token', tokens.access_token, {
       httpOnly: true,
-      secure: process.env.NODE_ENV !== 'development',
-      sameSite: 'strict',
+      secure: true,
+      sameSite: isProduction ? 'none' : 'lax',
       path: '/',
+      maxAge: 15 * 60 * 1000, // 15 minutes
     });
     res.cookie('refresh_token', tokens.refresh_token, {
       httpOnly: true,
-      secure: process.env.NODE_ENV !== 'development',
-      sameSite: 'strict',
+      secure: true,
+      sameSite: isProduction ? 'none' : 'lax',
       path: '/',
+      maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
     });
     return {
       status: 'success',
@@ -83,11 +87,14 @@ export class AuthController {
   ) {
     // The user object is attached by the jwt-refresh.strategy
     const tokens = await this.authService.refreshToken(req.user);
+    const isProduction = process.env.NODE_ENV === 'production';
+    
     res.cookie('access_token', tokens.access_token, {
       httpOnly: true,
-      secure: process.env.NODE_ENV !== 'development',
-      sameSite: 'strict',
+      secure: true,
+      sameSite: isProduction ? 'none' : 'lax',
       path: '/',
+      maxAge: 15 * 60 * 1000, // 15 minutes
     });
     return {
       status: 'success',
@@ -106,17 +113,21 @@ export class AuthController {
     @Res() res: Response,
   ) {
     const tokens = await this.authService.googleLogin(req.user);
+    const isProduction = process.env.NODE_ENV === 'production';
+    
     res.cookie('access_token', tokens.access_token, {
       httpOnly: true,
-      secure: process.env.NODE_ENV !== 'development', // use secure cookies in production
-      sameSite: 'strict',
+      secure: true,
+      sameSite: isProduction ? 'none' : 'lax',
       path: '/',
+      maxAge: 15 * 60 * 1000, // 15 minutes
     });
     res.cookie('refresh_token', tokens.refresh_token, {
       httpOnly: true,
-      secure: process.env.NODE_ENV !== 'development',
-      sameSite: 'strict',
+      secure: true,
+      sameSite: isProduction ? 'none' : 'lax',
       path: '/',
+      maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
     });
     res.redirect(`${process.env.FRONTEND_URL}/inbox`);
   }

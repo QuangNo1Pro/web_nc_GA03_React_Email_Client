@@ -135,4 +135,32 @@ Dự án này đã được tái cấu trúc để sử dụng mô hình xác th
 -   **Frontend (Vercel):** [https://web-nc-ga-03-react-email-client.vercel.app/](https://web-nc-ga-03-react-email-client.vercel.app/)
 -   **Backend (Render):** [https://web-nc-ga03-react-email-client.onrender.com](https://web-nc-ga03-react-email-client.onrender.com)
 
+### Cấu hình quan trọng cho Production
+
+**Backend (Render):**
+Đảm bảo các biến môi trường sau được thiết lập:
+```
+NODE_ENV=production
+CORS_ORIGIN=https://web-nc-ga-03-react-email-client.vercel.app
+FRONTEND_URL=https://web-nc-ga-03-react-email-client.vercel.app
+```
+
+**Frontend (Vercel):**
+Đảm bảo biến môi trường:
+```
+VITE_API_URL=https://web-nc-ga03-react-email-client.onrender.com
+```
+
+**Google OAuth2 Credentials:**
+- Thêm URL callback production vào Google Console:
+  - `https://web-nc-ga03-react-email-client.onrender.com/auth/google/callback`
+- Thêm authorized domains:
+  - `web-nc-ga03-react-email-client.onrender.com`
+  - `web-nc-ga-03-react-email-client.vercel.app`
+
+**Lưu ý về Cookies Cross-Origin:**
+- Ứng dụng sử dụng `sameSite: 'none'` và `secure: true` cookies cho production
+- Điều này cho phép cookies hoạt động giữa Vercel (frontend) và Render (backend)
+- Cả hai domain phải sử dụng HTTPS
+
 **Lưu ý:** Backend đã triển khai có các biến môi trường cần thiết cho thông tin xác thực Google.
