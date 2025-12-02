@@ -67,6 +67,10 @@ export class GmailService {
     }
   }
   
+  // Simple in-memory cache for emails with 10-second TTL
+  private emailCache = new Map<string, { data: any; timestamp: number }>();
+  private readonly CACHE_TTL = 10 * 1000; // 10 seconds
+
   constructor(
     private readonly usersService: UsersService,
     private readonly configService: ConfigService,
@@ -198,31 +202,19 @@ export class GmailService {
 
       console.log(`Getting emails for labelId: ${labelId} -> formatted: ${formattedLabelId}`);
 
+      // Check cache first (10-second TTL)
+      const cacheKey = `${userId}-${formattedLabelId}`;
+      const cached = this.emailCache.get(cacheKey);
+      if (cached && Date.now() - cached.timestamp < this.CACHE_TTL) {
+        console.log(`Returning cached emails for ${formattedLabelId} (age: ${Math.floor((Date.now() - cached.timestamp) / 1000)}s)`);
+        return cached.data;
+      }
+
       const gmail = await this.getGmailClient(userId);
 
-      // For DRAFT, always fetch from Gmail API, SKIP database entirely
-      if (formattedLabelId === 'DRAFT') {
-        console.log('Fetching drafts from Gmail API (skipping database)');
-        // Jump directly to draft fetching logic below
-      } else {
-        // Get emails from database first for non-draft labels
-        const dbEmails = await this.usersService.getEmailsByLabel(userId, formattedLabelId, 1, 200);
-        console.log(`Found ${dbEmails?.length || 0} emails in database for label: ${formattedLabelId}`);
-        if (dbEmails && dbEmails.length > 0) {
-          console.log(`Returning ${dbEmails.length} emails from database for label: ${formattedLabelId}`);
-          return {
-            messages: dbEmails.map(e => ({
-              id: e.messageId,
-              snippet: e.snippet,
-              payload: e.payload,
-              labelIds: e.labelIds,
-            })),
-            nextPageToken: undefined,
-          };
-        }
-        // If no emails in database, fetch from Gmail API
-        console.log(`No emails in database, fetching from Gmail API for label: ${formattedLabelId}`);
-      }
+      // ALWAYS fetch from Gmail API for real-time updates
+      // This ensures we get the latest emails without manual refresh
+      console.log(`Fetching fresh emails from Gmail API for label: ${formattedLabelId}`);
 
       if (formattedLabelId === 'DRAFT') {
         // Fetch drafts using gmail.users.drafts.list
@@ -290,10 +282,13 @@ export class GmailService {
             }
           })
         );
-        return {
+        const result = {
           messages: messages.filter((m) => m),
           nextPageToken: res.data.nextPageToken,
         };
+        // Cache the result
+        this.emailCache.set(cacheKey, { data: result, timestamp: Date.now() });
+        return result;
       } else {
         // Fetch normal emails using gmail.users.messages.list
         const res = await gmail.users.messages.list({
@@ -333,10 +328,13 @@ export class GmailService {
             }
           }),
         );
-        return {
+        const result = {
           messages: messages.filter((m) => m),
           nextPageToken: res.data.nextPageToken,
         };
+        // Cache the result
+        this.emailCache.set(cacheKey, { data: result, timestamp: Date.now() });
+        return result;
       }
     } catch (error) {
       console.error('Failed to get emails:', error);

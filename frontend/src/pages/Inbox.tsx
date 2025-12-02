@@ -116,6 +116,9 @@ export default function Inbox() {
   const [mailboxWidth, setMailboxWidth] = useState(20);
   const [emailListWidth, setEmailListWidth] = useState(40);
 
+  // Auto-refresh state
+  const [autoRefreshEnabled] = useState(true);
+
   // Compose email state & logic
   const {
     showComposeModal,
@@ -245,11 +248,17 @@ export default function Inbox() {
     data: emailsRaw,
     isLoading: emailsLoading,
     error: emailsError,
+    refetch: refetchEmails,
   } = useQuery({
     queryKey: ['emails', selectedMailbox],
     queryFn: () => fetchEmails(selectedMailbox),
-    enabled: !!selectedMailbox,
-    staleTime: 5 * 60 * 1000, // 5 minutes - prevent auto-refetch
+    enabled: !!selectedMailbox && autoRefreshEnabled,
+    staleTime: 0, // Always consider data stale to enable refetch
+    gcTime: 5 * 60 * 1000, // Keep cached data for 5 minutes
+    refetchInterval: 15 * 1000, // Auto-refetch every 15 seconds
+    refetchIntervalInBackground: true, // Continue refetching even if tab is backgrounded
+    refetchOnMount: true, // Refetch when component mounts
+    refetchOnWindowFocus: true, // Refetch when window regains focus
     select: (data) => {
       const parsedEmails = data.messages.map(parseEmail);
       if (selectedMailbox === 'ALL_MAIL') {
@@ -1843,6 +1852,30 @@ export default function Inbox() {
         onCancel={handleCancelDelete}
         isDangerous={true}
       />
+
+      {/* Failsafe auto-refresh polling */}
+      {autoRefreshEnabled && (
+        <AutoRefreshPoller refetchEmails={refetchEmails} interval={15 * 1000} />
+      )}
     </div>
   );
+}
+
+// Failsafe auto-refresh component
+function AutoRefreshPoller({
+  refetchEmails,
+  interval = 15 * 1000,
+}: {
+  refetchEmails: () => void;
+  interval?: number;
+}) {
+  useEffect(() => {
+    const intervalId = setInterval(() => {
+      refetchEmails();
+    }, interval);
+
+    return () => clearInterval(intervalId);
+  }, [refetchEmails, interval]);
+
+  return null; // This component doesn't render anything
 }
