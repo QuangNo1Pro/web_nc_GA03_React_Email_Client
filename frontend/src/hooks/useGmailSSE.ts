@@ -119,11 +119,6 @@ export function useGmailSSE(enabled: boolean = true) {
                     // Force immediate refetch to get latest data from server
                     queryClient.refetchQueries({ queryKey: ['mailboxes'], type: 'active' });
                     queryClient.refetchQueries({ queryKey: ['emails'], type: 'active' });
-                    
-                    toast.success('📬 New emails received', {
-                      duration: 2000,
-                      position: 'bottom-right',
-                    });
                   }
                 }
               } catch (err) {

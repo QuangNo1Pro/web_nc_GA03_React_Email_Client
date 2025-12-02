@@ -1665,11 +1665,19 @@ export default function Inbox() {
                   </div>
                 ) : (
                   // Initial load - show full spinner
-                  <div className="flex items-center justify-center h-full">
-                    <div className="text-center" style={{ color: 'var(--text-secondary)' }}>
-                      <div className="spinner" style={{ marginBottom: '16px' }} />
-                      <p style={{ fontSize: '14px', opacity: 0.7 }}>Đang tải email...</p>
-                    </div>
+                  <div
+                    style={{
+                      display: 'flex',
+                      flexDirection: 'column',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      height: '100%',
+                      width: '100%',
+                      minHeight: '320px',
+                    }}
+                  >
+                    <div className="spinner" style={{ marginBottom: '16px' }} />
+                    <p style={{ fontSize: '14px', opacity: 0.7, textAlign: 'center' }}>Đang tải email...</p>
                   </div>
                 )
               ) : 
@@ -1894,10 +1902,10 @@ export default function Inbox() {
                   className="mb-4"
                 />
                 <p className="text-lg font-medium text-gray-700">
-                  Select an email to view details
+                  Chọn một email để xem chi tiết
                 </p>
                 <p className="text-sm text-gray-500 mt-2">
-                  Choose a message from the list to read
+                  Chọn một tin nhắn từ danh sách để đọc
                 </p>
               </div>
             )}
