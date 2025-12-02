@@ -70,6 +70,27 @@ export const extractEmails = (raw: string = "") => {
 };
 
 export const parseEmail = (email: any) => {
+  // If email is already parsed (from draft API), return as-is with minor adjustments
+  if (email.sender && email.subject !== undefined && email.timestamp && email.preview !== undefined) {
+    return {
+      id: email.id,
+      sender: email.sender || '(Không có người gửi)',
+      subject: email.subject || '(Không có tiêu đề)',
+      timestamp: email.timestamp,
+      starred: email.labelIds?.includes('STARRED') || false,
+      read: !email.labelIds?.includes('UNREAD'),
+      preview: email.preview || '',
+      labelIds: email.labelIds || [],
+      to: email.to || '',
+      cc: email.cc || '',
+      bcc: email.bcc || '',
+      body: email.body || '',
+      attachments: email.attachments || [],
+      draftId: email.draftId,
+    };
+  }
+
+  // Otherwise, parse from payload (normal email)
   const payload = email.payload || {};
   const headers = payload.headers || [];
   const fromHeader = headers.find((h: any) => h.name === 'From')?.value || '';
@@ -89,7 +110,6 @@ export const parseEmail = (email: any) => {
   const read = !email.labelIds?.includes('UNREAD');
   const preview = email.snippet;
 
-  // Nếu là draft, lấy các trường từ payload
   return {
     id: email.id,
     sender,
@@ -99,13 +119,10 @@ export const parseEmail = (email: any) => {
     read,
     preview,
     labelIds: email.labelIds || [],
-    payload: {
-      to: payload.to || '',
-      cc: payload.cc || '',
-      bcc: payload.bcc || '',
-      subject: payload.subject || '',
-      body: payload.body || '',
-      attachments: payload.attachments || [],
-    },
+    to: '',
+    cc: '',
+    bcc: '',
+    body: '',
+    attachments: [],
   };
 };

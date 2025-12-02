@@ -39,6 +39,7 @@ import { useEmailPagination } from '../hooks/useEmailPagination';
 const FixedSizeList = (ReactWindow as any).FixedSizeList;
 
 import EmailDetail from '../components/EmailDetail';
+import ConfirmDialog from '../components/ConfirmDialog';
 
 import {
   mailboxLabelVN,
@@ -144,20 +145,41 @@ export default function Inbox() {
   // Hàm đóng compose và lưu nháp nếu chưa gửi
   const handleCloseCompose = async () => {
     // Nếu chưa gửi, có subject/body hoặc file thì lưu nháp
-    const hasContent = composeSubject || composeBody || composeAttachments.length > 0;
-    const notSent = !isSending && (hasContent || composeTo || composeCc || composeBcc);
+    const hasContent = composeSubject.trim() || composeBody.trim() || composeAttachments.length > 0;
+    const notSent = !isSending && (hasContent || composeTo.trim() || composeCc.trim() || composeBcc.trim());
     if (notSent) {
       try {
+        // Convert files to base64 for draft
+        const attachmentsBase64 = await Promise.all(
+          composeAttachments.map(async (file) => {
+            const base64 = await new Promise<string>((resolve) => {
+              const reader = new FileReader();
+              reader.onloadend = () => {
+                const result = reader.result as string;
+                resolve(result.split(',')[1]);
+              };
+              reader.readAsDataURL(file);
+            });
+            return { filename: file.name, mimeType: file.type, base64Content: base64 };
+          })
+        );
+        
         await saveDraft({
           to: composeTo,
           cc: composeCc,
           bcc: composeBcc,
           subject: composeSubject,
           body: composeBody,
-          attachments: composeAttachments.map(f => ({ filename: f.name, mimeType: f.type, base64Content: '' })), // TODO: convert file to base64
+          attachments: attachmentsBase64,
         });
+        
+        // Refresh draft mailbox to show new draft
+        queryClient.invalidateQueries({ queryKey: ['emails', 'DRAFT'] });
+        queryClient.invalidateQueries({ queryKey: ['mailboxes'] });
+        
         toast.success('Đã lưu vào thư nháp');
       } catch (err) {
+        console.error('Save draft error:', err);
         toast.error('Lưu nháp thất bại');
       }
     }
@@ -206,6 +228,8 @@ export default function Inbox() {
     useState(false);
   const [isDeleteHoveredDetail, setIsDeleteHoveredDetail] =
     useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [emailToDelete, setEmailToDelete] = useState<string | null>(null);
 
 
   const {
@@ -225,6 +249,7 @@ export default function Inbox() {
     queryKey: ['emails', selectedMailbox],
     queryFn: () => fetchEmails(selectedMailbox),
     enabled: !!selectedMailbox,
+    staleTime: 5 * 60 * 1000, // 5 minutes - prevent auto-refetch
     select: (data) => {
       const parsedEmails = data.messages.map(parseEmail);
       if (selectedMailbox === 'ALL_MAIL') {
@@ -552,6 +577,9 @@ export default function Inbox() {
       return { ...oldDetail, read: newRead };
     });
 
+    // DO NOT remove email from cache, just update read state
+    // Email will stay in list until manual refresh or folder change
+
     try {
       await api.patch(`/gmail/emails/${emailId}/read`, {
         read: newRead,
@@ -574,20 +602,49 @@ export default function Inbox() {
   };
 
 
-  const handleEmailSelect = (emailId: string) => {
+  const handleEmailSelect = async (emailId: string) => {
+    // If in UNREAD mailbox, remove read emails from cache when selecting new email
+    if (selectedMailbox === 'UNREAD' && selectedEmail !== emailId) {
+      queryClient.setQueryData(['emails', 'UNREAD'], (oldData: any) => {
+        if (!oldData || !oldData.messages) return oldData;
+        // Remove emails that are marked as read in readState
+        return {
+          ...oldData,
+          messages: oldData.messages.filter((e: any) => {
+            // Keep email if it's not in readState or if it's marked as unread
+            return readState[e.id] === undefined || !readState[e.id];
+          })
+        };
+      });
+    }
+
     const emailObj = emails.find((e: any) => e.id === emailId);
     if (selectedMailbox === 'DRAFT' && emailObj) {
       // Nếu là thư nháp, mở compose và điền lại nội dung
-      setShowComposeModal(true);
-      setComposeTo(emailObj.payload?.to || '');
-      setComposeCc(emailObj.payload?.cc || '');
-      setComposeBcc(emailObj.payload?.bcc || '');
-      setComposeSubject(emailObj.payload?.subject || '');
-      setComposeBody(emailObj.payload?.body || '');
-      setComposeAttachments([]); // TODO: load lại file nếu cần
-      setShowCc(!!emailObj.payload?.cc);
-      setShowBcc(!!emailObj.payload?.bcc);
-      setComposeErrors({});
+      try {
+        // Fetch full email details to get body and attachments
+        const { data: draftDetail } = await api.get(`/gmail/emails/${emailId}`);
+        
+        // Extract recipients from headers
+        const toHeader = draftDetail.headers?.To || emailObj.to || '';
+        const ccHeader = draftDetail.headers?.Cc || emailObj.cc || '';
+        const bccHeader = draftDetail.headers?.Bcc || emailObj.bcc || '';
+        const subjectHeader = draftDetail.headers?.Subject || emailObj.subject || '';
+        
+        setComposeTo(toHeader);
+        setComposeCc(ccHeader);
+        setComposeBcc(bccHeader);
+        setComposeSubject(subjectHeader);
+        setComposeBody(draftDetail.body || emailObj.body || '');
+        setComposeAttachments([]); // Attachments handling can be enhanced later
+        setShowCc(!!ccHeader);
+        setShowBcc(!!bccHeader);
+        setComposeErrors({});
+        setShowComposeModal(true);
+      } catch (err) {
+        console.error('Error loading draft:', err);
+        toast.error('Không thể mở thư nháp');
+      }
       return;
     }
     setSelectedEmail(emailId);
@@ -751,13 +808,47 @@ export default function Inbox() {
   const handleDeleteEmail = async (emailId?: string) => {
     const id = emailId || selectedEmail;
     if (!id) return;
+
+    // Check if email is in trash
+    const emailObj = emails?.find((e: any) => e.id === id);
+    const isInTrash = emailObj?.labelIds?.includes('TRASH') || selectedMailbox === 'TRASH';
+
+    if (isInTrash) {
+      // Use native browser confirm dialog
+      const confirmed = window.confirm('Thư sẽ được xóa vĩnh viễn. Bạn chắc chắn muốn xóa nó chứ?');
+      if (!confirmed) return;
+      await performDelete(id, true);
+      return;
+    }
+
+    // Delete immediately for non-trash emails
+    await performDelete(id, false);
+  };
+
+  const performDelete = async (emailId: string, isPermanent: boolean) => {
     try {
-      await api.delete(`/gmail/emails/${id}`);
-      setSelectedEmail(null);
+      await api.delete(`/gmail/emails/${emailId}`);
+      // Only clear selectedEmail if the deleted email is no longer in emails list
+      if (selectedEmail === emailId) {
+        // Wait for emails to refresh, then check if email still exists
+        setTimeout(() => {
+          const stillExists = emails?.some((e: any) => e.id === emailId);
+          if (!stillExists) {
+            setSelectedEmail(null);
+          }
+        }, 500);
+      }
       setSelectedEmails(new Set());
       // Only invalidate mailboxes for count updates
       queryClient.invalidateQueries({ queryKey: ['mailboxes'] });
-      toast.success('Đã chuyển email vào thùng rác!');
+      queryClient.invalidateQueries({ queryKey: ['emails', selectedMailbox] });
+      
+      if (isPermanent) {
+        toast.success('Đã xóa vĩnh viễn.');
+      } else {
+        toast.success('Đã xóa email.');
+      }
+      
       await handleRefresh(true);
     } catch (err: any) {
       console.error('Delete email error:', err);
@@ -773,6 +864,19 @@ export default function Inbox() {
         toast.error(errorMsg);
       }
     }
+  };
+
+  const handleConfirmDelete = async () => {
+    if (emailToDelete) {
+      await performDelete(emailToDelete, true);
+      setShowDeleteConfirm(false);
+      setEmailToDelete(null);
+    }
+  };
+
+  const handleCancelDelete = () => {
+    setShowDeleteConfirm(false);
+    setEmailToDelete(null);
   };
 
   const handleArchiveEmail = async (emailId?: string) => {
@@ -1392,7 +1496,7 @@ export default function Inbox() {
                   title="Xóa email"
                   onClick={() => {
                     if (selectedEmails.size === 0 && !selectedEmail) return;
-                    if (!confirm("Xóa email đã chọn?")) return;
+                    // Không cần xác nhận khi xóa ngoài thùng rác, xác nhận đã xử lý ở EmailDetail
 
                     if (selectedEmails.size > 0) {
                       selectedEmails.forEach((id) => handleDeleteEmail(id));
@@ -1705,7 +1809,7 @@ export default function Inbox() {
       {/* Compose Modal */}
       <ComposeModal
         showComposeModal={showComposeModal}
-        setShowComposeModal={setShowComposeModal}
+        setShowComposeModal={handleCloseCompose}
         composeTo={composeTo}
         setComposeTo={setComposeTo}
         composeCc={composeCc}
@@ -1726,6 +1830,18 @@ export default function Inbox() {
         setComposeErrors={setComposeErrors}
         isSending={isSending}
         handleSendEmail={handleSendEmail}
+      />
+
+      {/* Delete Confirmation Dialog */}
+      <ConfirmDialog
+        isOpen={showDeleteConfirm}
+        title="Xác nhận xóa"
+        message="Thư sẽ được xóa vĩnh viễn. Bạn chắc chắn muốn xóa nó chứ?"
+        confirmText="Xóa vĩnh viễn"
+        cancelText="Hủy"
+        onConfirm={handleConfirmDelete}
+        onCancel={handleCancelDelete}
+        isDangerous={true}
       />
     </div>
   );

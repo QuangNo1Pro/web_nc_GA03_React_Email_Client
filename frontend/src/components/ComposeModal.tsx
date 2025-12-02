@@ -1,11 +1,10 @@
 import React from 'react';
-import ReactQuill from 'react-quill';
-import 'react-quill/dist/quill.snow.css';
+import QuillEditor from './QuillEditor';
 import MaterialIcon from './MaterialIcon';
 
 interface ComposeModalProps {
   showComposeModal: boolean;
-  setShowComposeModal: (v: boolean) => void;
+  setShowComposeModal: () => void;
   composeTo: string;
   setComposeTo: (v: string) => void;
   composeCc: string;
@@ -57,7 +56,7 @@ const ComposeModal: React.FC<ComposeModalProps> = ({
     <div
       className="fixed inset-0 z-50 flex items-center justify-center p-4"
       style={{ backgroundColor: 'rgba(0, 0, 0, 0.4)' }}
-      onClick={() => setShowComposeModal(false)}
+      onClick={setShowComposeModal}
     >
       <div
         className="w-full max-w-3xl flex flex-col rounded-lg overflow-hidden shadow-2xl"
@@ -85,7 +84,7 @@ const ComposeModal: React.FC<ComposeModalProps> = ({
             </span>
           </div>
           <button
-            onClick={() => setShowComposeModal(false)}
+            onClick={setShowComposeModal}
             className="p-2 rounded-lg transition-colors"
             style={{ color: 'var(--text-secondary)' }}
             onMouseEnter={(e) => {
@@ -253,7 +252,12 @@ const ComposeModal: React.FC<ComposeModalProps> = ({
           <div>
             <label className="text-sm font-medium mb-1 block">Nội dung</label>
             <div className="border rounded-lg border-gray-300 overflow-hidden">
-              <ReactQuill theme="snow" value={composeBody} onChange={setComposeBody} modules={{ toolbar: [[{ header: [1, 2, 3, false] }], ["bold", "italic", "underline"], [{ list: "bullet" }, { list: "ordered" }], ["link", "image"], ["clean"]] }} placeholder="Nhập nội dung... (Hỗ trợ dán ảnh)" style={{ height: 200 }} />
+              <QuillEditor
+                value={composeBody}
+                onChange={setComposeBody}
+                placeholder="Nhập nội dung... (Hỗ trợ dán ảnh)"
+                style={{ height: 200 }}
+              />
             </div>
           </div>
           {/* ATTACHMENTS */}

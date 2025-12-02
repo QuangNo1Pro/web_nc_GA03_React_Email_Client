@@ -3,6 +3,7 @@ import { FaRegStar, FaStar } from 'react-icons/fa';
 import { FiFileText, FiTrash2 } from 'react-icons/fi';
 import { ArrowReply20Regular, ArrowReplyAll20Regular, ArrowForward20Regular } from '@fluentui/react-icons';
 import { getAvatarColor, extractEmails } from '../utils/emailUtils';
+import toast from 'react-hot-toast';
 
 interface EmailDetailProps {
   email: any;

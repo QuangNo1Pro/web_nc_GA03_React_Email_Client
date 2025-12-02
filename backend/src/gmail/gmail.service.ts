@@ -14,34 +14,59 @@ import { ConfigService } from '@nestjs/config';
 
 @Injectable()
 export class GmailService {
-    async saveDraft(
-      userId: string,
-      to: string,
-      subject: string,
-      body: string,
-      cc?: string,
-      bcc?: string,
-      attachments?: { filename: string; mimeType: string; base64Content: string }[],
-    ) {
-      // Tạo một email nháp, chưa gửi, lưu vào DB với labelIds: ['DRAFT']
-      const draftEmail = {
-        userId,
-        messageId: `${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-        snippet: body?.slice(0, 100) || '',
-        labelIds: ['DRAFT'],
-        payload: {
-          to,
-          subject,
-          body,
-          cc,
-          bcc,
-          attachments,
+  async saveDraft(
+    userId: string,
+    to: string,
+    subject: string,
+    body: string,
+    cc?: string,
+    bcc?: string,
+    attachments?: { filename: string; mimeType: string; base64Content: string }[],
+  ) {
+    try {
+      const gmail = await this.getGmailClient(userId);
+      
+      // Create email message (from is optional, Gmail will use authenticated user)
+      const message = this.createMessage(to, subject, body, cc, bcc, attachments, undefined);
+      
+      // Create draft on Gmail
+      const response = await gmail.users.drafts.create({
+        userId: 'me',
+        requestBody: {
+          message: {
+            raw: message,
+          },
         },
-        internalDate: Date.now().toString(),
-      };
-      await this.usersService.saveEmails(userId, [draftEmail]);
-      return { success: true, draft: draftEmail };
+      });
+
+      // Save to MongoDB for faster access
+      if (response.data.message?.id) {
+        const draftEmail = {
+          userId,
+          messageId: response.data.message.id,
+          snippet: body?.slice(0, 100) || '',
+          labelIds: ['DRAFT'],
+          payload: {
+            to,
+            subject,
+            body,
+            cc,
+            bcc,
+            attachments,
+          },
+          internalDate: Date.now().toString(),
+        };
+        await this.usersService.saveEmails(userId, [draftEmail]);
+      }
+      
+      return { success: true, draft: response.data };
+    } catch (error: any) {
+      console.error('Error saving draft:', error);
+      console.error('Error details:', error.response?.data || error.message);
+      throw new InternalServerErrorException(`Failed to save draft: ${error.message}`);
     }
+  }
+  
   constructor(
     private readonly usersService: UsersService,
     private readonly configService: ConfigService,
@@ -173,73 +198,146 @@ export class GmailService {
 
       console.log(`Getting emails for labelId: ${labelId} -> formatted: ${formattedLabelId}`);
 
-      // Get emails from database first
-      const dbEmails = await this.usersService.getEmailsByLabel(userId, formattedLabelId, 1, 200);
-
-      console.log(`Found ${dbEmails?.length || 0} emails in database for label: ${formattedLabelId}`);
-
-      if (dbEmails && dbEmails.length > 0) {
-        console.log(`Returning ${dbEmails.length} emails from database for label: ${formattedLabelId}`);
-        return {
-          messages: dbEmails.map(e => ({
-            id: e.messageId,
-            snippet: e.snippet,
-            payload: e.payload,
-            labelIds: e.labelIds,
-          })),
-          nextPageToken: undefined,
-        };
-      }
-
-      // If no emails in database, fetch from Gmail API
-      console.log(`No emails in database, fetching from Gmail API for label: ${formattedLabelId}`);
       const gmail = await this.getGmailClient(userId);
 
-      const res = await gmail.users.messages.list({
-        userId: 'me',
-        labelIds: [formattedLabelId],
-        pageToken,
-      });
+      // For DRAFT, always fetch from Gmail API, SKIP database entirely
+      if (formattedLabelId === 'DRAFT') {
+        console.log('Fetching drafts from Gmail API (skipping database)');
+        // Jump directly to draft fetching logic below
+      } else {
+        // Get emails from database first for non-draft labels
+        const dbEmails = await this.usersService.getEmailsByLabel(userId, formattedLabelId, 1, 200);
+        console.log(`Found ${dbEmails?.length || 0} emails in database for label: ${formattedLabelId}`);
+        if (dbEmails && dbEmails.length > 0) {
+          console.log(`Returning ${dbEmails.length} emails from database for label: ${formattedLabelId}`);
+          return {
+            messages: dbEmails.map(e => ({
+              id: e.messageId,
+              snippet: e.snippet,
+              payload: e.payload,
+              labelIds: e.labelIds,
+            })),
+            nextPageToken: undefined,
+          };
+        }
+        // If no emails in database, fetch from Gmail API
+        console.log(`No emails in database, fetching from Gmail API for label: ${formattedLabelId}`);
+      }
 
-      if (!res.data.messages) {
-        console.log('No messages found for label:', formattedLabelId);
+      if (formattedLabelId === 'DRAFT') {
+        // Fetch drafts using gmail.users.drafts.list
+        const res = await gmail.users.drafts.list({
+          userId: 'me',
+          pageToken,
+        });
+        if (!res.data.drafts) {
+          console.log('No drafts found');
+          return {
+            messages: [],
+            nextPageToken: res.data.nextPageToken,
+          };
+        }
+        console.log(`Found ${res.data.drafts.length} drafts`);
+        const messages = await Promise.all(
+          res.data.drafts.map(async (draft) => {
+            try {
+              if (!draft.id) return null;
+              const msg = await gmail.users.drafts.get({
+                userId: 'me',
+                id: draft.id,
+              });
+              // Extract headers
+              const headers = (msg.data.message?.payload?.headers || []).reduce((acc: Record<string, string>, h) => {
+                if (h.name && h.value) {
+                  acc[h.name.toLowerCase()] = h.value;
+                }
+                return acc;
+              }, {});
+              // Extract body (text/html preferred)
+              let body = '';
+              const payload = msg.data.message?.payload;
+              if (payload?.parts) {
+                for (const part of payload.parts) {
+                  if (part.mimeType === 'text/html' && part.body?.data) {
+                    body = Buffer.from(part.body.data, 'base64').toString();
+                    break;
+                  }
+                }
+              } else if (payload?.body?.data) {
+                body = Buffer.from(payload.body.data, 'base64').toString();
+              }
+              // Compose preview
+              const preview = msg.data.message?.snippet || body.slice(0, 120);
+              // Compose timestamp
+              const timestamp = msg.data.message?.internalDate ? Number(msg.data.message.internalDate) : Date.now();
+              return {
+                id: msg.data.id,
+                draftId: draft.id,
+                subject: headers['subject'] || '(Không có tiêu đề)',
+                sender: headers['from'] || '',
+                to: headers['to'] || '',
+                cc: headers['cc'] || '',
+                bcc: headers['bcc'] || '',
+                body,
+                labelIds: msg.data.message?.labelIds,
+                timestamp,
+                preview,
+                attachments: [], // TODO: parse attachments if needed
+              };
+            } catch (err) {
+              console.error(`Failed to get draft details for ${draft.id}:`, err);
+              return null;
+            }
+          })
+        );
         return {
-          messages: [],
+          messages: messages.filter((m) => m),
+          nextPageToken: res.data.nextPageToken,
+        };
+      } else {
+        // Fetch normal emails using gmail.users.messages.list
+        const res = await gmail.users.messages.list({
+          userId: 'me',
+          labelIds: [formattedLabelId],
+          pageToken,
+        });
+        if (!res.data.messages) {
+          console.log('No messages found for label:', formattedLabelId);
+          return {
+            messages: [],
+            nextPageToken: res.data.nextPageToken,
+          };
+        }
+        console.log(`Found ${res.data.messages.length} messages for label: ${formattedLabelId}`);
+        const messages = await Promise.all(
+          res.data.messages.map(async (message) => {
+            try {
+              if (!message.id) {
+                return null;
+              }
+              const msg = await gmail.users.messages.get({
+                userId: 'me',
+                id: message.id,
+                format: 'metadata',
+                metadataHeaders: ['From', 'To', 'Subject', 'Date'],
+              });
+              return {
+                id: msg.data.id,
+                snippet: msg.data.snippet,
+                payload: msg.data.payload,
+                labelIds: msg.data.labelIds,
+              };
+            } catch (err) {
+              console.error(`Failed to get message details for ${message.id}:`, err);
+              return null;
+            }
+          }),
+        );
+        return {
+          messages: messages.filter((m) => m),
           nextPageToken: res.data.nextPageToken,
         };
       }
-
-      console.log(`Found ${res.data.messages.length} messages for label: ${formattedLabelId}`);
-
-      const messages = await Promise.all(
-        res.data.messages.map(async (message) => {
-          try {
-            if (!message.id) {
-              return null;
-            }
-            const msg = await gmail.users.messages.get({
-              userId: 'me',
-              id: message.id,
-              format: 'metadata',
-              metadataHeaders: ['From', 'To', 'Subject', 'Date'],
-            });
-            return {
-              id: msg.data.id,
-              snippet: msg.data.snippet,
-              payload: msg.data.payload,
-              labelIds: msg.data.labelIds,
-            };
-          } catch (err) {
-            console.error(`Failed to get message details for ${message.id}:`, err);
-            return null;
-          }
-        }),
-      );
-
-      return {
-        messages: messages.filter((m) => m),
-        nextPageToken: res.data.nextPageToken,
-      };
     } catch (error) {
       console.error('Failed to get emails:', error);
       throw new InternalServerErrorException('Failed to get emails');
@@ -685,12 +783,17 @@ await gmail.users.messages.modify({
     if (from) {
       emailLines.push(`From: ${from}`);
     }
-    emailLines.push(`To: ${to}`);
-    if (cc) {
-      emailLines.push(`Cc: ${cc}`);
+    // Only add 'To' header if it's a valid email address
+    // Gmail draft allows omitting 'To' header
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (to && emailRegex.test(to.trim())) {
+      emailLines.push(`To: ${to.trim()}`);
     }
-    if (bcc) {
-      emailLines.push(`Bcc: ${bcc}`);
+    if (cc && cc.trim()) {
+      emailLines.push(`Cc: ${cc.trim()}`);
+    }
+    if (bcc && bcc.trim()) {
+      emailLines.push(`Bcc: ${bcc.trim()}`);
     }
     
     // RFC 2047 encoding for subject with UTF-8
