@@ -78,7 +78,7 @@
     ```
 4.  **Khởi động máy chủ phát triển:**
     ```sh
-    npm run start:dev
+    npm run dev
     ```
     Máy chủ backend sẽ chạy trên `http://localhost:3000`.
 
@@ -134,5 +134,42 @@ Dự án này đã được tái cấu trúc để sử dụng mô hình xác th
 
 -   **Frontend (Vercel):** [https://web-nc-ga-03-react-email-client.vercel.app/](https://web-nc-ga-03-react-email-client.vercel.app/)
 -   **Backend (Render):** [https://web-nc-ga03-react-email-client.onrender.com](https://web-nc-ga03-react-email-client.onrender.com)
+
+### Cấu hình quan trọng cho Production
+
+**Backend (Render):**
+Đảm bảo các biến môi trường sau được thiết lập:
+```
+NODE_ENV=production
+CORS_ORIGIN=https://web-nc-ga-03-react-email-client.vercel.app
+FRONTEND_URL=https://web-nc-ga-03-react-email-client.vercel.app
+```
+
+**Frontend (Vercel):**
+Đảm bảo biến môi trường:
+```
+VITE_API_URL=https://web-nc-ga03-react-email-client.onrender.com
+```
+
+**Google OAuth2 Credentials:**
+- Thêm URL callback production vào Google Console:
+  - `https://web-nc-ga03-react-email-client.onrender.com/auth/google/callback`
+- Thêm authorized domains:
+  - `web-nc-ga03-react-email-client.onrender.com`
+  - `web-nc-ga-03-react-email-client.vercel.app`
+
+**Lưu ý về Cookies Cross-Origin:**
+- Ứng dụng sử dụng `sameSite: 'none'` và `secure: true` cookies cho production
+- Điều này cho phép cookies hoạt động giữa Vercel (frontend) và Render (backend)
+- Cả hai domain phải sử dụng HTTPS
+- Cookies không được set với `domain` attribute để browser tự quản lý
+
+**Debug Cookies trên Production:**
+Nếu gặp lỗi 401 "Not authenticated" sau khi đăng nhập Google:
+1. Mở Developer Tools (F12) → Tab Application/Storage → Cookies
+2. Kiểm tra domain của backend (render.com) có cookies `access_token` và `refresh_token` không
+3. Đảm bảo cookies có attributes: `HttpOnly`, `Secure`, `SameSite=None`
+4. Xóa tất cả cookies và thử đăng nhập lại
+5. Kiểm tra Console logs có lỗi CORS không
 
 **Lưu ý:** Backend đã triển khai có các biến môi trường cần thiết cho thông tin xác thực Google.

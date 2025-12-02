@@ -244,9 +244,12 @@ export default function Inbox() {
     data: mailboxes,
     isLoading: mailboxesLoading,
     error: mailboxesError,
+    isFetching: mailboxesFetching,
   } = useQuery({
     queryKey: ['mailboxes'],
     queryFn: fetchMailboxes,
+    refetchInterval: 30000, // Auto-refresh every 30 seconds
+    refetchIntervalInBackground: false, // Only refresh when tab is active
   });
 
   const {
@@ -254,11 +257,14 @@ export default function Inbox() {
     isLoading: emailsLoading,
     isFetching: emailsFetching,
     error: emailsError,
+    isFetching: emailsFetching,
   } = useQuery({
     queryKey: ['emails', selectedMailbox],
     queryFn: () => fetchEmails(selectedMailbox),
     enabled: !!selectedMailbox,
-    staleTime: 5 * 60 * 1000, // 5 minutes - prevent auto-refetch
+    staleTime: 30000, // Consider data fresh for 30 seconds
+    refetchInterval: 30000, // Auto-refresh every 30 seconds
+    refetchIntervalInBackground: false, // Only refresh when tab is active
     select: (data) => {
       const parsedEmails = data.messages.map(parseEmail);
       if (selectedMailbox === 'ALL_MAIL') {
@@ -279,6 +285,27 @@ export default function Inbox() {
       read: readState[email.id] !== undefined ? readState[email.id] : email.read,
     }));
   }, [emailsRaw, readState]);
+
+  // Track previous email count to detect new emails
+  const prevEmailCountRef = useRef<number | null>(null);
+  
+  useEffect(() => {
+    if (emails && selectedMailbox === 'INBOX') {
+      const currentCount = emails.length;
+      const prevCount = prevEmailCountRef.current;
+      
+      // If there are more emails than before, show notification
+      if (prevCount !== null && currentCount > prevCount) {
+        const newEmailsCount = currentCount - prevCount;
+        toast.success(`${newEmailsCount} email mới đã đến!`, {
+          icon: '📧',
+          duration: 3000,
+        });
+      }
+      
+      prevEmailCountRef.current = currentCount;
+    }
+  }, [emails, selectedMailbox]);
 
   const {
     data: emailDetail,
@@ -1399,7 +1426,7 @@ export default function Inbox() {
                 <button
                   className="w-9 h-9 flex items-center justify-center rounded-lg transition-all translate-y-[1px]"
                   onClick={() => handleRefresh()}
-                  title="Làm mới"
+                  title={emailsFetching || mailboxesFetching ? "Đang đồng bộ..." : "Làm mới (Tự động mỗi 30s)"}
                   onMouseEnter={(e) => {
                     e.currentTarget.style.backgroundColor = 'var(--bg-hover)';
                   }}
@@ -1409,11 +1436,29 @@ export default function Inbox() {
                 >
                   <span
                     className="material-symbols-outlined"
-                    style={{ color: 'var(--text-primary)', fontSize: '20px' }}
+                    style={{ 
+                      color: 'var(--text-primary)', 
+                      fontSize: '20px',
+                      animation: (emailsFetching || mailboxesFetching) ? 'spin 1s linear infinite' : 'none'
+                    }}
                   >
                     refresh
                   </span>
                 </button>
+                
+                {/* Auto-sync indicator */}
+                {(emailsFetching || mailboxesFetching) && (
+                  <span 
+                    className="text-xs px-2 py-0.5 rounded-full ml-1"
+                    style={{ 
+                      backgroundColor: 'var(--accent-primary)',
+                      color: 'white',
+                      fontSize: '10px'
+                    }}
+                  >
+                    Đang đồng bộ
+                  </span>
+                )}
               </div>
 
               {/* ===== RIGHT: ACTION BUTTONS ===== */}
@@ -1437,6 +1482,7 @@ export default function Inbox() {
                     <input
                       type="checkbox"
                       className="w-4 h-4 cursor-pointer accent-blue-600"
+                      aria-label="Chọn tất cả email"
                       checked={
                         paginatedEmails.length > 0 &&
                         selectedEmails.size === paginatedEmails.length
@@ -1621,6 +1667,7 @@ export default function Inbox() {
               <input
                 type="checkbox"
                 className="w-4 h-4 cursor-pointer"
+                aria-label="Chọn tất cả email trên mobile"
                 checked={
                   paginatedEmails.length > 0 &&
                   selectedEmails.size === paginatedEmails.length
