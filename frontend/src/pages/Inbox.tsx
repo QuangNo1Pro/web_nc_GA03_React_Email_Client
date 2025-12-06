@@ -1452,6 +1452,7 @@ export default function Inbox() {
                     <input
                       type="checkbox"
                       className="w-4 h-4 cursor-pointer accent-blue-600"
+                      aria-label="Chọn tất cả email"
                       checked={
                         paginatedEmails.length > 0 &&
                         selectedEmails.size === paginatedEmails.length
@@ -1634,6 +1635,7 @@ export default function Inbox() {
               <input
                 type="checkbox"
                 className="w-4 h-4 cursor-pointer"
+                aria-label="Chọn tất cả email trên mobile"
                 checked={
                   paginatedEmails.length > 0 &&
                   selectedEmails.size === paginatedEmails.length
