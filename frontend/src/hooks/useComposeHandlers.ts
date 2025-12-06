@@ -21,6 +21,8 @@ export function useComposeHandlers({
   setShowComposeModal,
   setComposeErrors,
   setIsSending,
+  editingDraftId,
+  setEditingDraftId,
   user,
   onSendSuccess,
 }: {
@@ -41,6 +43,8 @@ export function useComposeHandlers({
   setShowComposeModal: (v: boolean) => void;
   setComposeErrors: (v: any) => void;
   setIsSending: (v: boolean) => void;
+  editingDraftId: string | null;
+  setEditingDraftId: (v: string | null) => void;
   user: any;
   onSendSuccess?: () => void | Promise<void>;
 }) {
@@ -133,6 +137,16 @@ export function useComposeHandlers({
         attachments: processedAttachments,
       });
       
+      // Nếu đang gửi từ draft, xóa draft cũ
+      if (editingDraftId) {
+        try {
+          await api.delete(`/gmail/emails/${editingDraftId}`);
+          console.log(`Deleted draft ${editingDraftId} after sending`);
+        } catch (err) {
+          console.error('Failed to delete draft after sending:', err);
+        }
+      }
+      
       // Clear form
       setComposeTo('');
       setComposeCc('');
@@ -143,6 +157,7 @@ export function useComposeHandlers({
       setShowCc(false);
       setShowBcc(false);
       setShowComposeModal(false);
+      setEditingDraftId(null); // Clear editing draft ID
       
       toast.success('Gửi email thành công!');
       

@@ -147,7 +147,9 @@ export default function Inbox() {
     composeErrors,
     setComposeErrors,
     isSending,
-    setIsSending
+    setIsSending,
+    editingDraftId,
+    setEditingDraftId
   } = useComposeEmail();
 
   // Hàm đóng compose và lưu nháp nếu chưa gửi
@@ -172,6 +174,7 @@ export default function Inbox() {
           })
         );
         
+        // Lưu hoặc update draft
         await saveDraft({
           to: composeTo,
           cc: composeCc,
@@ -179,13 +182,14 @@ export default function Inbox() {
           subject: composeSubject,
           body: composeBody,
           attachments: attachmentsBase64,
+          draftId: editingDraftId || undefined, // Pass draftId nếu đang edit
         });
         
         // Refresh draft mailbox to show new draft
         queryClient.invalidateQueries({ queryKey: ['emails', 'DRAFT'] });
         queryClient.invalidateQueries({ queryKey: ['mailboxes'] });
         
-        toast.success('Đã lưu vào thư nháp');
+        toast.success(editingDraftId ? 'Đã cập nhật thư nháp' : 'Đã lưu vào thư nháp');
       } catch (err) {
         console.error('Save draft error:', err);
         toast.error('Lưu nháp thất bại');
@@ -201,6 +205,7 @@ export default function Inbox() {
     setShowCc(false);
     setShowBcc(false);
     setComposeErrors({});
+    setEditingDraftId(null); // Clear editing draft ID
   };
   <button onClick={handleCloseCompose} className="text-gray-500 hover:text-gray-700">✕</button>
 
@@ -418,6 +423,7 @@ export default function Inbox() {
         case 'c':
           if (e.ctrlKey || e.metaKey) {
             e.preventDefault();
+            setEditingDraftId(null);
             setShowComposeModal(true);
           }
           break;
@@ -649,6 +655,7 @@ export default function Inbox() {
         setShowCc(!!ccHeader);
         setShowBcc(!!bccHeader);
         setComposeErrors({});
+        setEditingDraftId(emailId); // Set draft ID đang chỉnh sửa
         setShowComposeModal(true);
       } catch (err) {
         console.error('Error loading draft:', err);
@@ -1014,6 +1021,7 @@ export default function Inbox() {
     setShowBcc(false);
     setComposeSubject(`Re: ${email.subject.replace(/^Re:\s*/i, '')}`);
     setComposeBody('');
+    setEditingDraftId(null);
     setShowComposeModal(true);
   };
 
@@ -1042,6 +1050,7 @@ export default function Inbox() {
     setShowBcc(false);
     setComposeSubject(`Re: ${email.subject.replace(/^Re:\s*/i, '')}`);
     setComposeBody('');
+    setEditingDraftId(null);
     setShowComposeModal(true);
   };
 
@@ -1052,6 +1061,7 @@ export default function Inbox() {
     setComposeBody(
       `\n\n--- Forwarded message ---\nFrom: ${email.from}\nDate: ${new Date(email.received).toLocaleString('vi-VN')}\nSubject: ${email.subject}\nTo: ${email.to}\n\n${email.body.replace(/<[^>]*>/g, '')}`
     );
+    setEditingDraftId(null);
     setShowComposeModal(true);
   };
 
@@ -1074,6 +1084,8 @@ export default function Inbox() {
     setShowComposeModal,
     setComposeErrors,
     setIsSending,
+    editingDraftId,
+    setEditingDraftId,
     user,
     onSendSuccess: async () => {
       // Chỉ refresh dữ liệu, KHÔNG chuyển folder
@@ -1253,7 +1265,10 @@ export default function Inbox() {
                 e.currentTarget.style.transform = 'translateY(0)';
                 e.currentTarget.style.boxShadow = 'var(--shadow-sm)';
               }}
-              onClick={() => setShowComposeModal(true)}
+              onClick={() => {
+                setEditingDraftId(null);
+                setShowComposeModal(true);
+              }}
             >
               <MaterialIcon name="edit" size={18} />
               <span>Soạn thư</span>

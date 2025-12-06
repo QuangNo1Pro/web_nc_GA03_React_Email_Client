@@ -157,7 +157,7 @@ const Sidebar: React.FC<SidebarProps> = ({
             <button
               key={mailbox.id}
               onClick={() => onMailboxSelect(mailbox.id)}
-              className="w-full flex items-center gap-2 px-3 py-20 rounded-lg mb-0.5 transition-colors duration-150"
+              className="w-full flex items-center gap-2 px-3 py- rounded-lg mb-0.5 transition-colors duration-150"
               style={{
                 backgroundColor: isSelected ? 'var(--bg-selected)' : 'transparent',
                 color: isSelected ? 'var(--accent-primary)' : 'var(--text-primary)',

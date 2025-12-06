@@ -24,6 +24,7 @@ export class GmailService {
     cc?: string,
     bcc?: string,
     attachments?: { filename: string; mimeType: string; base64Content: string }[],
+    draftId?: string, // Thêm param để update draft
   ) {
     try {
       const gmail = await this.getGmailClient(userId);
@@ -31,15 +32,32 @@ export class GmailService {
       // Create email message (from is optional, Gmail will use authenticated user)
       const message = this.createMessage(to, subject, body, cc, bcc, attachments, undefined);
       
-      // Create draft on Gmail
-      const response = await gmail.users.drafts.create({
-        userId: 'me',
-        requestBody: {
-          message: {
-            raw: message,
+      let response;
+      
+      // Nếu có draftId, update draft cũ
+      if (draftId) {
+        console.log(`Updating draft ${draftId}...`);
+        response = await gmail.users.drafts.update({
+          userId: 'me',
+          id: draftId,
+          requestBody: {
+            message: {
+              raw: message,
+            },
           },
-        },
-      });
+        });
+      } else {
+        // Tạo draft mới
+        console.log('Creating new draft...');
+        response = await gmail.users.drafts.create({
+          userId: 'me',
+          requestBody: {
+            message: {
+              raw: message,
+            },
+          },
+        });
+      }
 
       // Save to MongoDB for faster access
       if (response.data.message?.id) {
@@ -140,20 +158,20 @@ export class GmailService {
       // Get mailboxes from database
       const mailboxes = await this.usersService.getMailboxes(userId);
 
-      // Always recalculate unread count for INBOX from DB
-      let inboxUnread = 0;
-      const inboxMailbox = mailboxes.find(m => m.id === 'INBOX');
-      if (inboxMailbox) {
-        inboxUnread = await this.usersService.countUnreadInboxEmails(userId);
-      }
-
       if (mailboxes && mailboxes.length > 0) {
-        return mailboxes.map(m => ({
-          id: m.id, // Real Gmail label ID (e.g., "INBOX", "Label_123", "SENT")
-          name: m.name, // Human-readable name
-          messagesTotal: m.messagesTotal,
-          messagesUnread: m.id === 'INBOX' ? inboxUnread : m.messagesUnread,
-        }));
+        // Đếm unread từ DB cho TẤT CẢ mailboxes
+        const mailboxesWithRealUnread = await Promise.all(
+          mailboxes.map(async (m) => {
+            const unreadCount = await this.usersService.countUnreadByLabel(userId, m.id);
+            return {
+              id: m.id, // Real Gmail label ID (e.g., "INBOX", "Label_123", "SENT")
+              name: m.name, // Human-readable name
+              messagesTotal: m.messagesTotal,
+              messagesUnread: unreadCount, // Luôn tính từ DB
+            };
+          })
+        );
+        return mailboxesWithRealUnread;
       }
 
       // If no mailboxes in database, fetch from Gmail API
@@ -380,6 +398,34 @@ export class GmailService {
       throw new InternalServerErrorException('Message ID not provided');
     }
     const gmail = await this.getGmailClient(userId);
+    
+    // Check if this is a draft ID (starts with 'r')
+    const isDraft = messageId.startsWith('r');
+    
+    if (isDraft) {
+      // Fetch draft instead of message
+      const res = await gmail.users.drafts.get({
+        userId: 'me',
+        id: messageId,
+      });
+
+      if (!res.data.message?.payload) {
+        throw new InternalServerErrorException('Draft payload not found');
+      }
+
+      const body = this.parseBody(res.data.message.payload);
+      const headers = this.parseHeaders(res.data.message.payload.headers || []);
+
+      return {
+        id: res.data.id,
+        snippet: res.data.message.snippet,
+        payload: res.data.message.payload,
+        body,
+        headers,
+      };
+    }
+    
+    // Regular email
     const res = await gmail.users.messages.get({
       userId: 'me',
       id: messageId,
@@ -1010,24 +1056,21 @@ await gmail.users.messages.modify({
         console.log(`✅ Saved ${changedEmails.length} emails successfully`);
       }
 
-      // Update mailboxes (quick count update)
+      // Update mailboxes (CHỈ update messagesTotal, messagesUnread sẽ được tính từ DB)
       const labelsRes = await gmail.users.labels.list({ userId: 'me' });
       const labels = (labelsRes.data.labels || []).filter(label => label.id);
-      const mailboxes = labels.map(label => ({
-        userId,
-        id: label.id!,
-        name: label.name || 'Unknown',
-        messagesTotal: label.messagesTotal || 0,
-        messagesUnread: label.messagesUnread || 0,
-      }));
-      await this.usersService.saveMailboxes(userId, mailboxes);
+      
+      // Update từng mailbox riêng lẻ để giữ nguyên messagesUnread
+      for (const label of labels) {
+        await this.usersService.updateMailboxTotal(userId, label.id!, label.messagesTotal || 0);
+      }
 
       // Store new historyId
       await this.usersService.setLastHistoryId(userId, currentHistoryId);
 
       console.log(`Incremental sync complete: ${changedEmails.length} changed, ${deletedMessageIds.size} deleted`);
       return {
-        mailboxes: mailboxes.length,
+        mailboxes: labels.length,
         changed: changedEmails.length,
         deleted: deletedMessageIds.size,
       };
@@ -1063,12 +1106,12 @@ await gmail.users.messages.modify({
       await this.usersService.saveMailboxes(userId, mailboxes);
       console.log(`Saved ${mailboxes.length} mailboxes for user ${userId}`);
 
-      // Lấy 200 email gần nhất cho mỗi label INBOX, SENT, SPAM, TRASH với batch processing
+      // Lấy 200 email gần nhất cho mỗi label quan trọng với batch processing
       let totalEmails = 0;
-      const labelsToFetch = ['INBOX', 'SENT', 'SPAM', 'TRASH'];
+      const labelsToFetch = ['INBOX', 'SENT', 'STARRED', 'SPAM', 'TRASH', 'DRAFT', 'IMPORTANT'];
       const batchSize = 10;
 
-      // Tổng hợp tất cả email từ các label, lưu labelIds đầy đủ
+      // Tổng hợp tất cả email từ các label, KHÔNG merge labelIds
       const emailMap: Record<string, any> = {};
       for (const label of labelsToFetch) {
         console.log(`Fetching emails from ${label}...`);
@@ -1093,10 +1136,8 @@ await gmail.users.messages.modify({
                   });
                   const emailId = msg.data.id;
                   if (typeof emailId === 'string' && emailId.length > 0) {
-                    if (emailMap[emailId]) {
-                      const oldLabels = emailMap[emailId].labelIds || [];
-                      emailMap[emailId].labelIds = Array.from(new Set([...(msg.data.labelIds || []), ...oldLabels]));
-                    } else {
+                    // KHÔNG merge labels - giữ nguyên labelIds từ Gmail API
+                    if (!emailMap[emailId]) {
                       emailMap[emailId] = {
                         id: emailId,
                         snippet: msg.data.snippet,

@@ -205,6 +205,34 @@ export class UsersService {
       .exec();
   }
 
+  async countUnreadByLabel(userId: string, labelId: string): Promise<number> {
+    // Special case: UNREAD label means emails that ONLY have UNREAD (not in other main folders)
+    if (labelId === 'UNREAD') {
+      return this.emailModel
+        .countDocuments({
+          userId,
+          labelIds: { $all: ['UNREAD'], $nin: ['INBOX', 'SENT', 'SPAM', 'TRASH'] }
+        })
+        .exec();
+    }
+
+    // For other labels: count emails that have both the label AND UNREAD
+    return this.emailModel
+      .countDocuments({
+        userId,
+        labelIds: { $all: [labelId, 'UNREAD'] },
+      })
+      .exec();
+  }
+
+  async updateMailboxTotal(userId: string, mailboxId: string, total: number) {
+    return this.mailboxModel.findOneAndUpdate(
+      { userId, id: mailboxId },
+      { $set: { messagesTotal: total } },
+      { new: true, upsert: true }
+    ).exec();
+  }
+
   // ---------- EMAIL ----------
   async saveEmails(userId: string, emails: any[]) {
     const ops = emails.map((email) => ({

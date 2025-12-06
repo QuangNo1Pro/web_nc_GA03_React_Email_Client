@@ -279,6 +279,7 @@ export class GmailController {
     subject: string;
     body: string;
     attachments?: { filename: string; mimeType: string; base64Content: string }[];
+    draftId?: string; // Thêm draftId để update draft
   }
 ) {
   return this.gmailService.saveDraft(
@@ -289,6 +290,7 @@ export class GmailController {
     body.cc,
     body.bcc,
     body.attachments,
+    body.draftId, // Pass draftId
   );
 }
 

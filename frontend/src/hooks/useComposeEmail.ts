@@ -16,6 +16,7 @@ export function useComposeEmail() {
     bcc?: string;
   }>({});
   const [isSending, setIsSending] = useState(false);
+  const [editingDraftId, setEditingDraftId] = useState<string | null>(null);
 
   return {
     showComposeModal,
@@ -40,5 +41,7 @@ export function useComposeEmail() {
     setComposeErrors,
     isSending,
     setIsSending,
+    editingDraftId,
+    setEditingDraftId,
   };
 }

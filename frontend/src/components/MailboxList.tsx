@@ -75,21 +75,24 @@ const MailboxList: React.FC<MailboxListProps> = ({
                   }}
                   onClick={() => onSelect(mailbox.id)}
                 >
-                  <div className="flex items-center gap-2 px-3 py-1">
-                    <span className="mailbox-icon flex-shrink-0" style={{ fontSize: '18px' }}>
-                      {getMailboxIcon(mailbox)}
-                    </span>
-                    <span className="mailbox-text flex-1 truncate pr-12" style={{ fontSize: '14px' }}>
-                      {getMailboxLabel(mailbox)}
-                    </span>
-                    {mailbox.messagesUnread > 0 && (
+                  <div className="flex items-center px-3 py-1" style={{ width: '100%' }}>
+                    <div className="flex items-center gap-2" style={{ width: '80%', minWidth: 0 }}>
+                      <span className="mailbox-icon flex-shrink-0" style={{ fontSize: '18px' }}>
+                        {getMailboxIcon(mailbox)}
+                      </span>
+                      <span className="mailbox-text truncate" style={{ fontSize: '14px', flex: 1 }}>
+                        {getMailboxLabel(mailbox)}
+                      </span>
+                    </div>
+                    {mailbox.id !== 'UNREAD' && mailbox.messagesUnread > 0 && (
                       <span
-                        className="mailbox-count px-2 py-0.5 text-xs font-semibold flex-shrink-0"
+                        className="mailbox-count text-xs font-semibold flex-shrink-0"
                         style={{
                           color: isSelected ? 'var(--accent-primary)' : 'var(--text-secondary)',
-                          minWidth: '24px',
-                          textAlign: 'center',
+                          width: '20%',
+                          textAlign: 'right',
                           fontSize: '13px',
+                          paddingLeft: '8px',
                         }}
                       >
                         {mailbox.messagesUnread}
