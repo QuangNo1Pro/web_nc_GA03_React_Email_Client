@@ -5,6 +5,7 @@ export function useEmailPagination(emails: any[], searchQuery: string, selectedM
 
   // Filter emails
   const filteredEmails = useMemo(() => {
+    console.log('[useEmailPagination] 📥 Input emails:', { count: emails?.length, sample: emails?.[0] });
     let result = emails || [];
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase();
@@ -13,6 +14,7 @@ export function useEmailPagination(emails: any[], searchQuery: string, selectedM
         email.subject?.toLowerCase().includes(q) ||
         email.preview?.toLowerCase().includes(q)
       );
+      console.log('[useEmailPagination] 🔍 After search filter:', result.length);
     }
     result = result.filter((email: any) => {
       if (
@@ -25,6 +27,7 @@ export function useEmailPagination(emails: any[], searchQuery: string, selectedM
       if (readFilter === 'unread' && email.read) return false;
       return true;
     });
+    console.log('[useEmailPagination] ✅ Final filtered:', result.length);
     return result;
   }, [emails, searchQuery, selectedMailbox, starredState, readFilter]);
 

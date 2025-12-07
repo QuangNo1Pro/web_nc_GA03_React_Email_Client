@@ -1,24 +1,38 @@
-export const saveDraft = async (payload: any) => {
-  return api.post('/gmail/draft', payload);
-};
-import { api } from './api';
+import { api, getUserProvider } from './api';
 
 export const fetchMailboxes = async () => {
-  const { data } = await api.get('/gmail/mailboxes');
-  return data;
+  const provider = await getUserProvider();
+  
+  if (provider === 'imap') {
+    const { data } = await api.get('/imap/mailboxes');
+    return data;
+  } else {
+    const { data } = await api.get('/gmail/mailboxes');
+    return data;
+  }
 };
 
 export const fetchEmails = async (mailboxId: string) => {
   try {
-    const { data } = await api.get(`/gmail/mailboxes/${mailboxId}/emails`);
-    // Ensure we always return a valid structure
-    return {
-      messages: data?.messages || [],
-      nextPageToken: data?.nextPageToken || undefined,
-    };
+    const provider = await getUserProvider();
+    
+    if (provider === 'imap') {
+      console.log('[EmailService] 📧 Fetching IMAP emails for mailbox:', mailboxId);
+      const { data } = await api.get(`/imap/emails/${mailboxId}`);
+      console.log('[EmailService] ✅ IMAP response:', { dataType: Array.isArray(data) ? 'array' : typeof data, count: data?.length, sample: data?.[0] });
+      return {
+        messages: data || [],
+        nextPageToken: undefined,
+      };
+    } else {
+      const { data } = await api.get(`/gmail/mailboxes/${mailboxId}/emails`);
+      return {
+        messages: data?.messages || [],
+        nextPageToken: data?.nextPageToken || undefined,
+      };
+    }
   } catch (error: any) {
-    console.error('Error fetching emails:', error?.response?.data || error.message);
-    // Return empty array instead of throwing to prevent "Error loading emails"
+    console.error('[EmailService] ❌ Error fetching emails:', error?.response?.data || error.message);
     return {
       messages: [],
       nextPageToken: undefined,
@@ -26,9 +40,27 @@ export const fetchEmails = async (mailboxId: string) => {
   }
 };
 
-export const fetchEmail = async (emailId: string) => {
-  const { data } = await api.get(`/gmail/emails/${emailId}`);
-  return data;
+export const saveDraft = async (payload: any) => {
+  return api.post('/gmail/draft', payload);
+};
+
+export const fetchEmail = async (emailId: string, mailbox: string = 'INBOX') => {
+  try {
+    const provider = await getUserProvider();
+    
+    if (provider === 'imap') {
+      console.log('[EmailService] 📧 Fetching IMAP email detail:', emailId, 'from', mailbox);
+      const { data } = await api.get(`/imap/email/${mailbox}/${emailId}`);
+      console.log('[EmailService] ✅ IMAP email detail:', data);
+      return data;
+    } else {
+      const { data } = await api.get(`/gmail/emails/${emailId}`);
+      return data;
+    }
+  } catch (error: any) {
+    console.error('[EmailService] ❌ Error fetching email detail:', error?.response?.data || error.message);
+    throw error;
+  }
 };
 
 export const patchEmailStar = async (emailId: string, starred: boolean) => {

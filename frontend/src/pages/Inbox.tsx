@@ -88,18 +88,40 @@ export default function Inbox() {
   const { theme, toggleTheme } = useTheme();
   const [showProfileMenu, setShowProfileMenu] = useState(false);
 
+  // Debug user provider
+  useEffect(() => {
+    if (user) {
+      console.log('[Inbox] 👤 User Info:', {
+        email: user.email,
+        provider: user.provider,
+        name: user.name,
+      });
+    }
+  }, [user]);
+
   // === Real-time email sync via SSE ===
-  const { isConnected: sseConnected } = useGmailSSE(true);
+  // Only enable SSE for Gmail users, not IMAP
+  const isGmailUser = user?.provider !== 'imap';
+  const { isConnected: sseConnected } = useGmailSSE(isGmailUser);
   
   // Debug SSE connection
   useEffect(() => {
-    console.log('[Inbox] SSE connection status:', sseConnected);
-  }, [sseConnected]);
+    console.log('[Inbox] SSE connection status:', sseConnected, '(Gmail user:', isGmailUser, ')');
+  }, [sseConnected, isGmailUser]);
 
   const handleLogout = () => {
     logout();
   };
 
+  // Show provider notification
+  useEffect(() => {
+    if (user?.provider) {
+      const providerLabel = user.provider === 'imap' ? '📧 IMAP' : '🔵 Google';
+      toast.success(`Đăng nhập thành công qua ${providerLabel}`, {
+        duration: 3000,
+      });
+    }
+  }, [user?.provider]);
 
   // 👉 Init INBOX cho đúng id Gmail
   const [searchQuery, setSearchQuery] = useState("");
@@ -265,7 +287,28 @@ export default function Inbox() {
     enabled: !!selectedMailbox,
     staleTime: 5 * 60 * 1000, // 5 minutes - prevent auto-refetch
     select: (data) => {
-      const parsedEmails = data.messages.map(parseEmail);
+      console.log('[Inbox] 📨 Raw data from fetchEmails:', { 
+        hasMessages: !!data?.messages, 
+        messageCount: data?.messages?.length,
+        firstMessage: data?.messages?.[0]
+      });
+      
+      if (!data?.messages || !Array.isArray(data.messages)) {
+        console.error('[Inbox] ❌ Invalid data structure:', data);
+        return [];
+      }
+      
+      const parsedEmails = data.messages.map((email, index) => {
+        try {
+          const parsed = parseEmail(email);
+          if (index === 0) console.log('[Inbox] ✅ First parsed email:', parsed);
+          return parsed;
+        } catch (error) {
+          console.error('[Inbox] ❌ Error parsing email:', email, error);
+          return email; // Return unparsed if parsing fails
+        }
+      });
+      
       if (selectedMailbox === 'ALL_MAIL') {
         // loại INBOX nếu cần
         return parsedEmails.filter(
@@ -278,11 +321,17 @@ export default function Inbox() {
 
   // Merge readState overrides into emails, exactly like starredState
   const emails = useMemo(() => {
-    if (!emailsRaw) return [];
-    return emailsRaw.map((email: any) => ({
+    if (!emailsRaw) {
+      console.log('[Inbox] ⚠️ emailsRaw is empty/null');
+      return [];
+    }
+    console.log('[Inbox] 📬 Processing emailsRaw:', { count: emailsRaw.length, sample: emailsRaw[0] });
+    const result = emailsRaw.map((email: any) => ({
       ...email,
       read: readState[email.id] !== undefined ? readState[email.id] : email.read,
     }));
+    console.log('[Inbox] ✅ Final emails array:', { count: result.length });
+    return result;
   }, [emailsRaw, readState]);
 
   const {
@@ -290,8 +339,8 @@ export default function Inbox() {
     isLoading: emailLoading,
     error: emailError,
   } = useQuery({
-    queryKey: ['email', selectedEmail ?? undefined],
-    queryFn: () => selectedEmail ? fetchEmail(selectedEmail) : Promise.resolve(undefined),
+    queryKey: ['email', selectedEmail ?? undefined, selectedMailbox],
+    queryFn: () => selectedEmail ? fetchEmail(selectedEmail, selectedMailbox) : Promise.resolve(undefined),
     enabled: !!selectedEmail,
   });
 
@@ -321,17 +370,20 @@ export default function Inbox() {
       const listEmail = emails?.find((e: any) => e.id === selectedEmail);
       if (!emailDetail) return listEmail || null;
 
+      // Check if this is IMAP format (has date field) or Gmail format (has headers)
+      const isImapFormat = emailDetail?.date && !emailDetail?.headers?.Date;
+      
       return {
         ...emailDetail,
         ...(listEmail || {}),
-        body: emailDetail?.body || '',
-        attachments: parseAttachments(emailDetail?.payload?.parts),
-        from: emailDetail?.headers?.From,
-        to: emailDetail?.headers?.To,
-        cc: emailDetail?.headers?.Cc,
-        bcc: emailDetail?.headers?.Bcc,
-        subject: emailDetail?.headers?.Subject,
-        received: emailDetail?.headers?.Date,
+        body: emailDetail?.body || emailDetail?.htmlBody || '',
+        attachments: isImapFormat ? (emailDetail?.attachments || []) : parseAttachments(emailDetail?.payload?.parts),
+        from: isImapFormat ? emailDetail?.from : emailDetail?.headers?.From,
+        to: isImapFormat ? emailDetail?.to : emailDetail?.headers?.To,
+        cc: isImapFormat ? emailDetail?.cc : emailDetail?.headers?.Cc,
+        bcc: isImapFormat ? emailDetail?.bcc : emailDetail?.headers?.Bcc,
+        subject: isImapFormat ? emailDetail?.subject : emailDetail?.headers?.Subject,
+        received: isImapFormat ? emailDetail?.date : emailDetail?.headers?.Date,
         // Override read state from readState for instant UI update
         read: readState[selectedEmail] !== undefined ? readState[selectedEmail] : emailDetail?.read,
       };

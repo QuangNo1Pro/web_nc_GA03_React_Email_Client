@@ -30,14 +30,27 @@ export class GmailPollingService implements OnModuleInit, OnModuleDestroy {
   /**
    * Bắt đầu polling cho 1 user
    */
-  startPollingForUser(userId: string) {
+  async startPollingForUser(userId: string) {
     // Nếu đã polling rồi thì bỏ qua
     if (this.pollingIntervals.has(userId)) {
       console.log(`[Gmail Polling] User ${userId} already polling`);
       return;
     }
 
-    console.log(`[Gmail Polling] Starting polling for user ${userId}`);
+    // Check user provider
+    const user = await this.usersService.findById(userId);
+    if (!user) {
+      console.log(`[Gmail Polling] User ${userId} not found`);
+      return;
+    }
+
+    const provider = (user as any).provider || 'google';
+    if (provider !== 'google') {
+      console.log(`[Gmail Polling] ⏭️ User ${userId} is using ${provider} provider, skipping Gmail polling`);
+      return;
+    }
+
+    console.log(`[Gmail Polling] Starting polling for user ${userId} (provider: google)`);
 
     // Poll ngay lần đầu
     this.pollGmailForUser(userId);

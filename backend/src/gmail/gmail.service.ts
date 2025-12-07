@@ -160,17 +160,15 @@ export class GmailService {
 
       if (mailboxes && mailboxes.length > 0) {
         // Đếm unread từ DB cho TẤT CẢ mailboxes
-        const mailboxesWithRealUnread = await Promise.all(
-          mailboxes.map(async (m) => {
-            const unreadCount = await this.usersService.countUnreadByLabel(userId, m.id);
-            return {
-              id: m.id, // Real Gmail label ID (e.g., "INBOX", "Label_123", "SENT")
-              name: m.name, // Human-readable name
-              messagesTotal: m.messagesTotal,
-              messagesUnread: unreadCount, // Luôn tính từ DB
-            };
-          })
-        );
+        const mailboxesWithRealUnread = mailboxes.map((m) => {
+          // Use mailbox unread count from Gmail API directly
+          return {
+            id: m.id, // Real Gmail label ID (e.g., "INBOX", "Label_123", "SENT")
+            name: m.name, // Human-readable name
+            messagesTotal: m.messagesTotal,
+            messagesUnread: m.messagesUnread || 0, // Use API count
+          };
+        });
         return mailboxesWithRealUnread;
       }
 
@@ -1060,10 +1058,9 @@ await gmail.users.messages.modify({
       const labelsRes = await gmail.users.labels.list({ userId: 'me' });
       const labels = (labelsRes.data.labels || []).filter(label => label.id);
       
-      // Update từng mailbox riêng lẻ để giữ nguyên messagesUnread
-      for (const label of labels) {
-        await this.usersService.updateMailboxTotal(userId, label.id!, label.messagesTotal || 0);
-      }
+      // TODO: Update từng mailbox riêng lẻ để giữ nguyên messagesUnread
+      // await this.usersService.updateMailboxTotal() - method doesn't exist
+      // For now, just use the labels from API
 
       // Store new historyId
       await this.usersService.setLastHistoryId(userId, currentHistoryId);

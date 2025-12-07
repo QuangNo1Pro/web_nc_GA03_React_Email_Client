@@ -22,22 +22,40 @@ export class UsersService {
   ) {}
 
   async findByEmail(email: string): Promise<UserDocument | null> {
-    return this.userModel.findOne({ email }).exec();
+    const user = await this.userModel
+      .findOne({ email })
+      .select('+googleAccessToken +googleRefreshToken +refreshToken +provider')
+      .exec();
+    if (user) {
+      console.log('[UsersService] findByEmail result - provider:', (user as any).provider);
+    }
+    return user;
   }
 
   async findByGoogleId(googleId: string) {
-    return this.userModel.findOne({ googleId }).exec();
+    const user = await this.userModel
+      .findOne({ googleId })
+      .select('+googleAccessToken +googleRefreshToken +refreshToken +provider')
+      .exec();
+    if (user) {
+      console.log('[UsersService] findByGoogleId result - provider:', (user as any).provider);
+    }
+    return user;
   }
 
   async findById(id: string) {
-    return this.userModel
+    const user = await this.userModel
       .findById(id)
-      .select('+googleAccessToken +googleRefreshToken +refreshToken')
+      .select('+googleAccessToken +googleRefreshToken +refreshToken +provider')
       .exec();
+    if (user) {
+      console.log('[UsersService] findById result - provider:', (user as any).provider);
+    }
+    return user;
   }
 
   // ---------- NORMAL REGISTER ----------
-  async create(createUserDto: CreateUserDto) {
+  async create(createUserDto: any): Promise<any> {
     const { email, password } = createUserDto;
 
     const existing = await this.findByEmail(email);
@@ -52,8 +70,17 @@ export class UsersService {
 
     try {
       const hashed = await bcrypt.hash(password, saltRounds);
-      const created = new this.userModel({ email, password: hashed });
-      return created.save();
+      const created = new this.userModel({ 
+        email, 
+        password: hashed,
+        provider: createUserDto.provider || 'local',
+        imapConfig: createUserDto.imapConfig,
+        imapPassword: createUserDto.imapPassword,
+        smtpConfig: createUserDto.smtpConfig,
+      });
+      const saved = await created.save();
+      // Re-fetch to ensure all fields including provider are returned
+      return await this.findById(saved._id.toString());
     } catch (err: any) {
       if (err.code === 11000) {
         throw new ConflictException('Email này đã được đăng ký');
@@ -205,34 +232,6 @@ export class UsersService {
       .exec();
   }
 
-  async countUnreadByLabel(userId: string, labelId: string): Promise<number> {
-    // Special case: UNREAD label means emails that ONLY have UNREAD (not in other main folders)
-    if (labelId === 'UNREAD') {
-      return this.emailModel
-        .countDocuments({
-          userId,
-          labelIds: { $all: ['UNREAD'], $nin: ['INBOX', 'SENT', 'SPAM', 'TRASH'] }
-        })
-        .exec();
-    }
-
-    // For other labels: count emails that have both the label AND UNREAD
-    return this.emailModel
-      .countDocuments({
-        userId,
-        labelIds: { $all: [labelId, 'UNREAD'] },
-      })
-      .exec();
-  }
-
-  async updateMailboxTotal(userId: string, mailboxId: string, total: number) {
-    return this.mailboxModel.findOneAndUpdate(
-      { userId, id: mailboxId },
-      { $set: { messagesTotal: total } },
-      { new: true, upsert: true }
-    ).exec();
-  }
-
   // ---------- EMAIL ----------
   async saveEmails(userId: string, emails: any[]) {
     const ops = emails.map((email) => ({
@@ -323,5 +322,48 @@ export class UsersService {
 
   async setLastHistoryId(userId: string, historyId: string) {
     return this.userModel.findByIdAndUpdate(userId, { lastHistoryId: historyId }).exec();
+  }
+
+  // ---------- IMAP CONFIG ----------
+  async updateImapConfig(
+    userId: string,
+    imapConfig: any,
+    encryptedPassword: string,
+    smtpConfig?: any,
+    provider?: string,
+  ) {
+    // Fetch user first
+    const user = await this.userModel.findById(userId).exec();
+    if (!user) {
+      console.log('[UsersService] User not found:', userId);
+      return null;
+    }
+
+    // Update fields directly on document
+    (user as any).imapConfig = imapConfig;
+    (user as any).imapPassword = encryptedPassword;
+    
+    if (smtpConfig) {
+      (user as any).smtpConfig = smtpConfig;
+    }
+
+    if (provider) {
+      (user as any).provider = provider;
+      console.log('[UsersService] Setting provider to:', provider);
+    }
+
+    // Save document
+    const result = await user.save();
+    
+    console.log('[UsersService] Saved IMAP config - provider in DB:', (result as any)?.provider);
+    return result;
+  }
+
+  async getImapConfig(userId: string) {
+    const user = await this.userModel
+      .findById(userId)
+      .select('imapConfig imapPassword smtpConfig')
+      .exec();
+    return user;
   }
 }

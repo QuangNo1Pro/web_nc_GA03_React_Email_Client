@@ -10,6 +10,18 @@ export interface UserDocument extends Document {
   name?: string;        // ✔ ADD
   refreshToken?: string;
   lastHistoryId?: string; // ✔ ADD for incremental sync
+  provider?: string; // 'google' or 'imap' or 'local'
+  imapConfig?: {
+    host: string;
+    port: number;
+    tls?: boolean;
+  };
+  imapPassword?: string; // encrypted
+  smtpConfig?: {
+    host: string;
+    port: number;
+    tls?: boolean;
+  };
   createdAt: Date;
 }
 
@@ -39,9 +51,27 @@ export const UserSchema = new Schema(
     refreshToken: { type: String, required: false },
     lastHistoryId: { type: String, required: false }, // for incremental sync
 
+    provider: { type: String, required: false, enum: ['google', 'imap', 'local'] },
+    
+    imapConfig: {
+      host: { type: String, required: false },
+      port: { type: Number, required: false },
+      tls: { type: Boolean, default: true },
+    },
+    imapPassword: { type: String, required: false },
+    
+    smtpConfig: {
+      host: { type: String, required: false },
+      port: { type: Number, required: false },
+      tls: { type: Boolean, default: true },
+    },
+
     createdAt: { type: Date, default: Date.now },
   },
-  { timestamps: false },
+  { 
+    timestamps: false,
+    strict: false  // Allow fields not in schema to be saved
+  },
 );
 
 // HIDE PASSWORD + REFRESH TOKEN

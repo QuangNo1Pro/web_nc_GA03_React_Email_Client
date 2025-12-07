@@ -7,6 +7,25 @@ export const api = axios.create({
   withCredentials: true, // Send cookies with cross-origin requests
 });
 
+// Helper to get user provider
+let cachedProvider: string | null = null;
+export const getUserProvider = async (): Promise<string> => {
+  if (cachedProvider !== null) return cachedProvider;
+  
+  try {
+    const { data } = await api.get('/auth/profile');
+    cachedProvider = data.provider || 'google';
+    return cachedProvider as string;
+  } catch (error) {
+    console.error('Failed to get user provider:', error);
+    return 'google'; // Default to google
+  }
+};
+
+export const clearProviderCache = () => {
+  cachedProvider = null;
+};
+
 let isRefreshing = false;
 let failedQueue: any[] = [];
 

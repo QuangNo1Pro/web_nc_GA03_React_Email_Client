@@ -90,7 +90,42 @@ export const parseEmail = (email: any) => {
     };
   }
 
-  // Otherwise, parse from payload (normal email)
+  // Handle IMAP format (from backend IMAP service)
+  if (email.from && email.date && email.snippet !== undefined) {
+    let sender = "";
+    const match = email.from.match(/^("?)([^"<]*)\1\s*<([^>]+)>$/);
+    if (match) {
+      sender = match[2].trim() || match[3].trim();
+    } else {
+      sender = email.from.trim();
+    }
+    
+    // Validate date and convert to ISO string if needed
+    let timestamp = email.date;
+    if (typeof timestamp === 'string' && !timestamp.includes('T')) {
+      // Try to parse if not already ISO format
+      const parsedDate = new Date(timestamp);
+      timestamp = isNaN(parsedDate.getTime()) ? new Date().toISOString() : parsedDate.toISOString();
+    }
+    
+    return {
+      id: email.id,
+      sender: sender || '(Không có người gửi)',
+      subject: email.subject || '(Không có tiêu đề)',
+      timestamp: timestamp,
+      starred: email.starred || false,
+      read: email.read !== false, // Default to true if not specified
+      preview: email.snippet || '',
+      labelIds: email.labels || [],
+      to: email.to || '',
+      cc: email.cc || '',
+      bcc: email.bcc || '',
+      body: email.body || '',
+      attachments: email.attachments || [],
+    };
+  }
+
+  // Otherwise, parse from payload (Gmail format)
   const payload = email.payload || {};
   const headers = payload.headers || [];
   const fromHeader = headers.find((h: any) => h.name === 'From')?.value || '';
@@ -105,7 +140,16 @@ export const parseEmail = (email: any) => {
     sender = fromHeader.trim();
   }
   const subject = subjectHeader;
-  const timestamp = new Date(dateHeader).toISOString();
+  
+  // Safe date parsing with fallback
+  let timestamp = new Date().toISOString();
+  if (dateHeader) {
+    const parsedDate = new Date(dateHeader);
+    if (!isNaN(parsedDate.getTime())) {
+      timestamp = parsedDate.toISOString();
+    }
+  }
+  
   const starred = email.labelIds?.includes('STARRED');
   const read = !email.labelIds?.includes('UNREAD');
   const preview = email.snippet;

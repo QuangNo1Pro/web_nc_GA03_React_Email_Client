@@ -11,6 +11,7 @@ import { JwtStrategy } from './jwt.strategy';
 import { JwtRefreshTokenStrategy } from './jwt-refresh.strategy';
 import { GoogleStrategy } from './google.strategy';
 import { GmailModule } from '../gmail/gmail.module';
+import { ImapModule } from '../imap/imap.module';
 
 @Module({
   imports: [
@@ -18,6 +19,7 @@ import { GmailModule } from '../gmail/gmail.module';
     PassportModule,
     ConfigModule,
     GmailModule,
+    ImapModule,
     JwtModule.registerAsync({
       imports: [ConfigModule],
       useFactory: async (configService: ConfigService) => ({
@@ -35,5 +37,6 @@ import { GmailModule } from '../gmail/gmail.module';
     GoogleStrategy,
   ],
   controllers: [AuthController],
+  exports: [JwtModule, AuthService, ImapModule],
 })
 export class AuthModule {}

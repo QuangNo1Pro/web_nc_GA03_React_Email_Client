@@ -4,6 +4,7 @@ import { MongooseModule } from '@nestjs/mongoose';
 import { UsersModule } from './users/users.module';
 import { AuthModule } from './auth/auth.module';
 import { GmailModule } from './gmail/gmail.module';
+import { ImapModule } from './imap/imap.module';
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
@@ -27,6 +28,7 @@ import { GmailModule } from './gmail/gmail.module';
     UsersModule,
     AuthModule,
     GmailModule,
+    ImapModule,
   ],
   controllers: [],
 })

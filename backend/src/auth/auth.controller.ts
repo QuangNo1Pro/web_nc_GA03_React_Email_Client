@@ -10,18 +10,25 @@ import {
   HttpStatus,
   Res,
   Req,
+  Inject,
 } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
 import { AuthService } from './auth.service';
 import { CreateUserDto } from '../users/dto/create-user.dto';
 import { UsersService } from '../users/users.service';
+import { ImapService } from '../imap/imap.service';
+import { EncryptionService } from '../imap/encryption.service';
 import { Response, Request as ExpressRequest } from 'express';
+import * as bcrypt from 'bcrypt';
+import { ForbiddenException } from '@nestjs/common';
 
 @Controller('auth')
 export class AuthController {
   constructor(
-    private authService: AuthService,
-    private usersService: UsersService,
+    @Inject(AuthService) private authService: AuthService,
+    @Inject(UsersService) private usersService: UsersService,
+    @Inject(ImapService) private imapService: ImapService,
+    @Inject(EncryptionService) private encryptionService: EncryptionService,
   ) {}
 
   @Post('register')
@@ -44,7 +51,7 @@ export class AuthController {
     
     res.cookie('access_token', tokens.access_token, {
       httpOnly: true,
-      secure: true,
+      secure: isProduction,
       sameSite: isProduction ? 'none' : 'lax',
       domain: isProduction ? undefined : undefined,
       path: '/',
@@ -52,7 +59,7 @@ export class AuthController {
     });
     res.cookie('refresh_token', tokens.refresh_token, {
       httpOnly: true,
-      secure: true,
+      secure: isProduction,
       sameSite: isProduction ? 'none' : 'lax',
       domain: isProduction ? undefined : undefined,
       path: '/',
@@ -94,7 +101,7 @@ export class AuthController {
     
     res.cookie('access_token', tokens.access_token, {
       httpOnly: true,
-      secure: true,
+      secure: isProduction,
       sameSite: isProduction ? 'none' : 'lax',
       domain: isProduction ? undefined : undefined,
       path: '/',
@@ -122,7 +129,7 @@ export class AuthController {
     
     res.cookie('access_token', tokens.access_token, {
       httpOnly: true,
-      secure: true,
+      secure: isProduction,
       sameSite: isProduction ? 'none' : 'lax',
       domain: isProduction ? undefined : undefined, // Let browser handle domain
       path: '/',
@@ -130,7 +137,7 @@ export class AuthController {
     });
     res.cookie('refresh_token', tokens.refresh_token, {
       httpOnly: true,
-      secure: true,
+      secure: isProduction,
       sameSite: isProduction ? 'none' : 'lax',
       domain: isProduction ? undefined : undefined, // Let browser handle domain
       path: '/',
@@ -171,6 +178,110 @@ export class AuthController {
       email: user.email,
       name: user.name,
       picture: user.picture,
+      provider: ((user as any).provider || 'google'), // Default to google for backward compatibility
     };
   }
+
+  @Post('imap-login')
+  @HttpCode(HttpStatus.OK)
+  async imapLogin(
+    @Body() data: {
+      email: string;
+      password: string;
+      imapConfig: { host: string; port: number; tls?: boolean };
+      smtpConfig?: { host: string; port: number; tls?: boolean };
+    },
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    try {
+      // Validate IMAP connection
+      const connection = await this.imapService.connectImap({
+        user: data.email,
+        password: data.password,
+        host: data.imapConfig.host,
+        port: data.imapConfig.port,
+        tls: data.imapConfig.tls ?? true,
+      });
+      await this.imapService.closeConnection(connection);
+    } catch (error) {
+      throw new ForbiddenException('Invalid IMAP credentials or configuration');
+    }
+
+    // Find or create user
+    let dbUser = await this.usersService.findByEmail(data.email);
+
+    if (!dbUser) {
+      // Create new IMAP user
+      dbUser = await this.usersService.create({
+        email: data.email,
+        password: await bcrypt.hash(data.password, 10),
+        provider: 'imap',
+        imapConfig: data.imapConfig,
+        imapPassword: this.encryptionService.encrypt(data.password),
+        smtpConfig: data.smtpConfig,
+      } as any);
+      if (dbUser) {
+        console.log('[Auth] 🆕 Created new IMAP user:', dbUser.email, 'provider:', (dbUser as any).provider);
+      }
+    } else {
+      // Update existing user with IMAP config
+      console.log('[Auth] ♻️ Updating existing user:', dbUser.email, 'old provider:', (dbUser as any).provider);
+      await this.usersService.updateImapConfig(
+        dbUser._id.toString(),
+        data.imapConfig,
+        this.encryptionService.encrypt(data.password),
+        data.smtpConfig,
+        'imap',
+      );
+      dbUser = await this.usersService.findByEmail(data.email);
+      if (dbUser) {
+        console.log('[Auth] ✅ Updated IMAP user:', dbUser.email, 'new provider:', (dbUser as any).provider);
+        // Ensure provider is set to 'imap'
+        if ((dbUser as any).provider !== 'imap') {
+          console.log('[Auth] ⚠️ WARNING: provider not updated! Force updating...');
+          await this.usersService.updateImapConfig(
+            dbUser._id.toString(),
+            data.imapConfig,
+            this.encryptionService.encrypt(data.password),
+            data.smtpConfig,
+            'imap',
+          );
+          dbUser = await this.usersService.findByEmail(data.email);
+          console.log('[Auth] 🔄 Re-fetched provider:', (dbUser as any).provider);
+        }
+      }
+    }
+
+    if (!dbUser) {
+      throw new ForbiddenException('Failed to create or update IMAP user');
+    }
+
+    // Generate tokens
+    const tokens = await this.authService.login(dbUser);
+    const isProduction = process.env.NODE_ENV === 'production';
+
+    res.cookie('access_token', tokens.access_token, {
+      httpOnly: true,
+      secure: isProduction,
+      sameSite: isProduction ? 'none' : 'lax',
+      path: '/',
+      maxAge: 15 * 60 * 1000,
+    });
+
+    res.cookie('refresh_token', tokens.refresh_token, {
+      httpOnly: true,
+      secure: isProduction,
+      sameSite: isProduction ? 'none' : 'lax',
+      path: '/',
+      maxAge: 7 * 24 * 60 * 60 * 1000,
+    });
+
+    return {
+      status: 'success',
+      message: 'IMAP login successful',
+      data: tokens,
+    };
+  }
+
+
 }

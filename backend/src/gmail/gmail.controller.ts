@@ -17,6 +17,7 @@ import { AuthGuard } from '@nestjs/passport';
 import { GmailService } from './gmail.service';
 import { SseService } from './sse.service';
 import { GmailPollingService } from './gmail-polling.service';
+import { UsersService } from '../users/users.service';
 import { Request as ExpressRequest, Response } from 'express';
 
 @Controller('gmail')
@@ -25,6 +26,7 @@ export class GmailController {
     private readonly gmailService: GmailService,
     private readonly sseService: SseService,
     private readonly gmailPollingService: GmailPollingService,
+    private readonly usersService: UsersService,
   ) { }
 
   // ========== SSE ENDPOINT (Real-time updates) ==========
@@ -48,13 +50,17 @@ export class GmailController {
     // Register connection
     this.sseService.addConnection(userId, res);
 
-    // Start Gmail polling for this user
-    console.log(`[Polling] ⏰ Starting polling for user ${userId}`);
+    // Get user to check provider
+    const user = await this.usersService.findById(userId);
+    const provider = user ? ((user as any).provider || 'google') : 'google';
+
+    // Start polling based on provider
+    console.log(`[Polling] ⏰ Starting polling for user ${userId} (provider: ${provider})`);
     this.gmailPollingService.startPollingForUser(userId);
 
-    // Send initial connected event
+    // Send initial connected event with provider info
     res.write('event: connected\n');
-    res.write(`data: ${JSON.stringify({ type: 'connected', userId })}\n\n`);
+    res.write(`data: ${JSON.stringify({ type: 'connected', userId, provider })}\n\n`);
 
     // Heartbeat every 30 seconds to keep connection alive
     const heartbeatInterval = setInterval(() => {
@@ -152,17 +158,35 @@ export class GmailController {
   // ========== EXISTING ENDPOINTS ==========
   @Get('mailboxes')
   @UseGuards(AuthGuard('jwt'))
-  getMailboxes(@Request() req: ExpressRequest) {
+  async getMailboxes(@Request() req: ExpressRequest) {
+    const user = await this.usersService.findById((req.user as any).userId);
+    const provider = user ? (user as any).provider : null;
+    
+    // If IMAP user, return empty to prevent errors
+    if (provider === 'imap') {
+      console.log('[Gmail Controller] IMAP user accessing Gmail endpoint, returning empty');
+      return [];
+    }
+    
     return this.gmailService.getMailboxes((req.user as any).userId);
   }
 
   @Get('mailboxes/:labelId/emails')
   @UseGuards(AuthGuard('jwt'))
-  getEmails(
+  async getEmails(
     @Request() req: ExpressRequest,
     @Param('labelId') labelId: string,
     @Query('pageToken') pageToken?: string,
   ) {
+    const user = await this.usersService.findById((req.user as any).userId);
+    const provider = user ? (user as any).provider : null;
+    
+    // If IMAP user, return empty to prevent errors
+    if (provider === 'imap') {
+      console.log('[Gmail Controller] IMAP user accessing Gmail endpoint, returning empty');
+      return { messages: [], nextPageToken: undefined };
+    }
+    
     return this.gmailService.getEmails(
       (req.user as any).userId,
       labelId,

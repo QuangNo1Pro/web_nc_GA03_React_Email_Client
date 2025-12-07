@@ -14,6 +14,19 @@ const schema = z.object({
 
 type FormValues = z.infer<typeof schema>;
 
+const imapSchema = z.object({
+  email: z.string().email({ message: 'Email không hợp lệ' }),
+  password: z.string().min(6, { message: 'Mật khẩu phải có ít nhất 6 ký tự' }),
+  imapHost: z.string().min(1, { message: 'IMAP host không được để trống' }),
+  imapPort: z.coerce.number().min(1, { message: 'Port không hợp lệ' }),
+  imapTls: z.boolean().default(true),
+  smtpHost: z.string().optional(),
+  smtpPort: z.coerce.number().optional(),
+  smtpTls: z.boolean().default(true).optional(),
+});
+
+type ImapFormValues = z.infer<typeof imapSchema>;
+
 export default function Login() {
   const {
     register,
@@ -23,9 +36,19 @@ export default function Login() {
     resolver: zodResolver(schema),
   });
 
+  const {
+    register: registerImap,
+    handleSubmit: handleSubmitImap,
+    formState: { errors: imapErrors },
+  } = useForm<ImapFormValues>({
+    resolver: zodResolver(imapSchema),
+  });
+
   const navigate = useNavigate();
   const { login } = useAuth();
   const [serverMessage, setServerMessage] = React.useState<string | null>(null);
+  const [activeTab, setActiveTab] = React.useState<'email' | 'imap'>('email');
+  const [showAdvanced, setShowAdvanced] = React.useState(false);
 
   const mutation = useMutation<any, any, FormValues, unknown>({
     mutationFn: (data: FormValues) =>
@@ -40,9 +63,40 @@ export default function Login() {
     },
   });
 
+  const imapMutation = useMutation<any, any, ImapFormValues, unknown>({
+    mutationFn: (data: ImapFormValues) =>
+      api.post('/auth/imap-login', {
+        email: data.email,
+        password: data.password,
+        imapConfig: {
+          host: data.imapHost,
+          port: data.imapPort,
+          tls: data.imapTls,
+        },
+        smtpConfig: data.smtpHost ? {
+          host: data.smtpHost,
+          port: data.smtpPort || 587,
+          tls: data.smtpTls,
+        } : undefined,
+      }).then((res) => res.data),
+    onSuccess: async () => {
+      await login();
+      setServerMessage('IMAP login successful');
+      setTimeout(() => navigate('/inbox'), 800);
+    },
+    onError: (err: any) => {
+      setServerMessage(err?.response?.data?.message || 'IMAP login failed');
+    },
+  });
+
   const onSubmit = (data: FormValues) => {
     setServerMessage(null);
     mutation.mutate(data);
+  };
+
+  const onSubmitImap = (data: ImapFormValues) => {
+    setServerMessage(null);
+    imapMutation.mutate(data);
   };
 
   const handleGoogleLogin = () => {
@@ -58,84 +112,322 @@ export default function Login() {
               Sign in to your account
             </h2>
           </div>
-          <form className="mt-8 space-y-6" onSubmit={handleSubmit(onSubmit)}>
-            <div className="rounded-md shadow-sm -space-y-px">
-              <div>
-                <label htmlFor="email-address" className="sr-only">
-                  Email address
-                </label>
-                <input
-                  id="email-address"
-                  type="email"
-                  autoComplete="email"
-                  required
-                  {...register('email')}
-                  className="appearance-none rounded-none relative block w-full px-3 py-2 border rounded-t-md focus:outline-none focus:z-10 sm:text-sm"
-                  style={{
-                    backgroundColor: 'var(--bg-primary)',
-                    borderColor: 'var(--border-primary)',
-                    color: 'var(--text-primary)'
-                  }}
-                  placeholder="Email address"
-                />
-              </div>
-              <div>
-                <label htmlFor="password" className="sr-only">
-                  Password
-                </label>
-                <input
-                  id="password"
-                  type="password"
-                  autoComplete="current-password"
-                  required
-                  {...register('password')}
-                  className="appearance-none rounded-none relative block w-full px-3 py-2 border rounded-b-md focus:outline-none focus:z-10 sm:text-sm"
-                  style={{
-                    backgroundColor: 'var(--bg-primary)',
-                    borderColor: 'var(--border-primary)',
-                    color: 'var(--text-primary)'
-                  }}
-                  placeholder="Password"
-                />
-              </div>
-            </div>
 
-            {serverMessage && (
-              <div
-                className={`p-2 rounded mb-4 ${
-                  mutation.isError
-                    ? 'bg-red-100 text-red-800'
-                    : 'bg-green-100 text-green-800'
-                }`}
-              >
-                {serverMessage}
-              </div>
-            )}
+          {/* Tab buttons */}
+          <div className="mt-8 flex border-b" style={{ borderColor: 'var(--border-primary)' }}>
+            <button
+              onClick={() => setActiveTab('email')}
+              className={`flex-1 py-2 px-4 text-center font-medium transition-colors ${
+                activeTab === 'email'
+                  ? 'text-accent-primary border-b-2'
+                  : 'text-text-secondary'
+              }`}
+              style={{
+                color: activeTab === 'email' ? 'var(--accent-primary)' : 'var(--text-secondary)',
+                borderBottomColor: activeTab === 'email' ? 'var(--accent-primary)' : 'transparent',
+              }}
+            >
+              Email Login
+            </button>
+            <button
+              onClick={() => setActiveTab('imap')}
+              className={`flex-1 py-2 px-4 text-center font-medium transition-colors ${
+                activeTab === 'imap'
+                  ? 'text-accent-primary border-b-2'
+                  : 'text-text-secondary'
+              }`}
+              style={{
+                color: activeTab === 'imap' ? 'var(--accent-primary)' : 'var(--text-secondary)',
+                borderBottomColor: activeTab === 'imap' ? 'var(--accent-primary)' : 'transparent',
+              }}
+            >
+              IMAP Login
+            </button>
+          </div>
 
-            <div>
-              <button
-                type="submit"
-                className="group relative w-full flex justify-center py-2 px-4 border border-transparent text-sm font-medium rounded-md focus:outline-none"
-                style={{
-                  backgroundColor: 'var(--accent-primary)',
-                  color: 'white'
-                }}
-                disabled={mutation.isPending}
-                onMouseEnter={(e) => {
-                  if (!mutation.isPending) {
-                    e.currentTarget.style.backgroundColor = 'var(--accent-primary-hover)';
-                  }
-                }}
-                onMouseLeave={(e) => {
-                  if (!mutation.isPending) {
-                    e.currentTarget.style.backgroundColor = 'var(--accent-primary)';
-                  }
-                }}
-              >
-                {mutation.isPending ? 'Signing in...' : 'Sign in'}
-              </button>
-            </div>
-          </form>
+          {/* Email Login Tab */}
+          {activeTab === 'email' && (
+            <form className="mt-8 space-y-6" onSubmit={handleSubmit(onSubmit)}>
+              <div className="rounded-md shadow-sm -space-y-px">
+                <div>
+                  <label htmlFor="email-address" className="sr-only">
+                    Email address
+                  </label>
+                  <input
+                    id="email-address"
+                    type="email"
+                    autoComplete="email"
+                    required
+                    {...register('email')}
+                    className="appearance-none rounded-none relative block w-full px-3 py-2 border rounded-t-md focus:outline-none focus:z-10 sm:text-sm"
+                    style={{
+                      backgroundColor: 'var(--bg-primary)',
+                      borderColor: 'var(--border-primary)',
+                      color: 'var(--text-primary)'
+                    }}
+                    placeholder="Email address"
+                  />
+                </div>
+                <div>
+                  <label htmlFor="password" className="sr-only">
+                    Password
+                  </label>
+                  <input
+                    id="password"
+                    type="password"
+                    autoComplete="current-password"
+                    required
+                    {...register('password')}
+                    className="appearance-none rounded-none relative block w-full px-3 py-2 border rounded-b-md focus:outline-none focus:z-10 sm:text-sm"
+                    style={{
+                      backgroundColor: 'var(--bg-primary)',
+                      borderColor: 'var(--border-primary)',
+                      color: 'var(--text-primary)'
+                    }}
+                    placeholder="Password"
+                  />
+                </div>
+              </div>
+
+              {serverMessage && activeTab === 'email' && (
+                <div
+                  className={`p-2 rounded mb-4 ${
+                    mutation.isError
+                      ? 'bg-red-100 text-red-800'
+                      : 'bg-green-100 text-green-800'
+                  }`}
+                >
+                  {serverMessage}
+                </div>
+              )}
+
+              <div>
+                <button
+                  type="submit"
+                  className="group relative w-full flex justify-center py-2 px-4 border border-transparent text-sm font-medium rounded-md focus:outline-none"
+                  style={{
+                    backgroundColor: 'var(--accent-primary)',
+                    color: 'white'
+                  }}
+                  disabled={mutation.isPending}
+                  onMouseEnter={(e) => {
+                    if (!mutation.isPending) {
+                      e.currentTarget.style.backgroundColor = 'var(--accent-primary-hover)';
+                    }
+                  }}
+                  onMouseLeave={(e) => {
+                    if (!mutation.isPending) {
+                      e.currentTarget.style.backgroundColor = 'var(--accent-primary)';
+                    }
+                  }}
+                >
+                  {mutation.isPending ? 'Signing in...' : 'Sign in'}
+                </button>
+              </div>
+            </form>
+          )}
+
+          {/* IMAP Login Tab */}
+          {activeTab === 'imap' && (
+            <form className="mt-8 space-y-6" onSubmit={handleSubmitImap(onSubmitImap)}>
+              <div className="space-y-4">
+                <div>
+                  <label htmlFor="imap-email" className="block text-sm font-medium" style={{ color: 'var(--text-primary)' }}>
+                    Email
+                  </label>
+                  <input
+                    id="imap-email"
+                    type="email"
+                    required
+                    {...registerImap('email')}
+                    className="mt-1 block w-full px-3 py-2 border rounded-md focus:outline-none focus:z-10 sm:text-sm"
+                    style={{
+                      backgroundColor: 'var(--bg-primary)',
+                      borderColor: imapErrors.email ? '#ef4444' : 'var(--border-primary)',
+                      color: 'var(--text-primary)'
+                    }}
+                    placeholder="your@email.com"
+                  />
+                  {imapErrors.email && <p className="text-red-500 text-sm mt-1">{imapErrors.email.message}</p>}
+                </div>
+
+                <div>
+                  <label htmlFor="imap-password" className="block text-sm font-medium" style={{ color: 'var(--text-primary)' }}>
+                    Password
+                  </label>
+                  <input
+                    id="imap-password"
+                    type="password"
+                    required
+                    {...registerImap('password')}
+                    className="mt-1 block w-full px-3 py-2 border rounded-md focus:outline-none focus:z-10 sm:text-sm"
+                    style={{
+                      backgroundColor: 'var(--bg-primary)',
+                      borderColor: imapErrors.password ? '#ef4444' : 'var(--border-primary)',
+                      color: 'var(--text-primary)'
+                    }}
+                    placeholder="Password"
+                  />
+                  {imapErrors.password && <p className="text-red-500 text-sm mt-1">{imapErrors.password.message}</p>}
+                </div>
+
+                <div>
+                  <label htmlFor="imap-host" className="block text-sm font-medium" style={{ color: 'var(--text-primary)' }}>
+                    IMAP Host
+                  </label>
+                  <input
+                    id="imap-host"
+                    type="text"
+                    required
+                    {...registerImap('imapHost')}
+                    className="mt-1 block w-full px-3 py-2 border rounded-md focus:outline-none focus:z-10 sm:text-sm"
+                    style={{
+                      backgroundColor: 'var(--bg-primary)',
+                      borderColor: imapErrors.imapHost ? '#ef4444' : 'var(--border-primary)',
+                      color: 'var(--text-primary)'
+                    }}
+                    placeholder="imap.gmail.com"
+                  />
+                  {imapErrors.imapHost && <p className="text-red-500 text-sm mt-1">{imapErrors.imapHost.message}</p>}
+                </div>
+
+                <div>
+                  <label htmlFor="imap-port" className="block text-sm font-medium" style={{ color: 'var(--text-primary)' }}>
+                    IMAP Port
+                  </label>
+                  <input
+                    id="imap-port"
+                    type="number"
+                    required
+                    {...registerImap('imapPort')}
+                    className="mt-1 block w-full px-3 py-2 border rounded-md focus:outline-none focus:z-10 sm:text-sm"
+                    style={{
+                      backgroundColor: 'var(--bg-primary)',
+                      borderColor: imapErrors.imapPort ? '#ef4444' : 'var(--border-primary)',
+                      color: 'var(--text-primary)'
+                    }}
+                    placeholder="993"
+                  />
+                  {imapErrors.imapPort && <p className="text-red-500 text-sm mt-1">{imapErrors.imapPort.message}</p>}
+                </div>
+
+                <div>
+                  <label className="flex items-center space-x-2">
+                    <input
+                      type="checkbox"
+                      {...registerImap('imapTls')}
+                      defaultChecked
+                      style={{
+                        accentColor: 'var(--accent-primary)',
+                      }}
+                    />
+                    <span style={{ color: 'var(--text-primary)' }}>Use TLS</span>
+                  </label>
+                </div>
+
+                {/* Advanced settings */}
+                <button
+                  type="button"
+                  onClick={() => setShowAdvanced(!showAdvanced)}
+                  className="text-sm font-medium"
+                  style={{ color: 'var(--accent-primary)' }}
+                >
+                  {showAdvanced ? '- Hide' : '+ Show'} SMTP Settings
+                </button>
+
+                {showAdvanced && (
+                  <div className="border-t pt-4" style={{ borderColor: 'var(--border-primary)' }}>
+                    <div>
+                      <label htmlFor="smtp-host" className="block text-sm font-medium" style={{ color: 'var(--text-primary)' }}>
+                        SMTP Host
+                      </label>
+                      <input
+                        id="smtp-host"
+                        type="text"
+                        {...registerImap('smtpHost')}
+                        className="mt-1 block w-full px-3 py-2 border rounded-md focus:outline-none focus:z-10 sm:text-sm"
+                        style={{
+                          backgroundColor: 'var(--bg-primary)',
+                          borderColor: 'var(--border-primary)',
+                          color: 'var(--text-primary)'
+                        }}
+                        placeholder="smtp.gmail.com"
+                      />
+                    </div>
+
+                    <div className="mt-3">
+                      <label htmlFor="smtp-port" className="block text-sm font-medium" style={{ color: 'var(--text-primary)' }}>
+                        SMTP Port
+                      </label>
+                      <input
+                        id="smtp-port"
+                        type="number"
+                        {...registerImap('smtpPort')}
+                        className="mt-1 block w-full px-3 py-2 border rounded-md focus:outline-none focus:z-10 sm:text-sm"
+                        style={{
+                          backgroundColor: 'var(--bg-primary)',
+                          borderColor: 'var(--border-primary)',
+                          color: 'var(--text-primary)'
+                        }}
+                        placeholder="587"
+                      />
+                    </div>
+
+                    <div className="mt-3">
+                      <label className="flex items-center space-x-2">
+                        <input
+                          type="checkbox"
+                          {...registerImap('smtpTls')}
+                          defaultChecked
+                          style={{
+                            accentColor: 'var(--accent-primary)',
+                          }}
+                        />
+                        <span style={{ color: 'var(--text-primary)' }}>Use TLS</span>
+                      </label>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {serverMessage && activeTab === 'imap' && (
+                <div
+                  className={`p-2 rounded mb-4 ${
+                    imapMutation.isError
+                      ? 'bg-red-100 text-red-800'
+                      : 'bg-green-100 text-green-800'
+                  }`}
+                >
+                  {serverMessage}
+                </div>
+              )}
+
+              <div>
+                <button
+                  type="submit"
+                  className="group relative w-full flex justify-center py-2 px-4 border border-transparent text-sm font-medium rounded-md focus:outline-none"
+                  style={{
+                    backgroundColor: 'var(--accent-primary)',
+                    color: 'white'
+                  }}
+                  disabled={imapMutation.isPending}
+                  onMouseEnter={(e) => {
+                    if (!imapMutation.isPending) {
+                      e.currentTarget.style.backgroundColor = 'var(--accent-primary-hover)';
+                    }
+                  }}
+                  onMouseLeave={(e) => {
+                    if (!imapMutation.isPending) {
+                      e.currentTarget.style.backgroundColor = 'var(--accent-primary)';
+                    }
+                  }}
+                >
+                  {imapMutation.isPending ? 'Connecting...' : 'Connect IMAP'}
+                </button>
+              </div>
+            </form>
+          )}
+
           <div className="mt-6">
             <div className="relative">
               <div className="absolute inset-0 flex items-center">
