@@ -133,9 +133,9 @@ export default function Login() {
   };
 
   return (
-    <div className="flex min-h-screen" style={{ backgroundColor: 'var(--bg-primary)' }}>
-      <div className="flex-1 flex items-center justify-center p-12" style={{ backgroundColor: 'var(--bg-secondary)' }}>
-        <div className="max-w-md w-full">
+    <div className="flex h-screen" style={{ backgroundColor: 'var(--bg-primary)' }}>
+      <div className="flex-1 flex justify-center overflow-y-auto" style={{ backgroundColor: 'var(--bg-secondary)' }}>
+        <div className="max-w-md w-full p-12">
           <div>
             <h2 className="mt-6 text-center text-3xl font-extrabold" style={{ color: 'var(--text-primary)' }}>
               Sign in to your account
@@ -560,7 +560,7 @@ export default function Login() {
           </div>
         </div>
       </div>
-      <div className="hidden lg:flex flex-1 items-center justify-center" style={{ backgroundColor: 'var(--accent-primary)' }}>
+      <div className="hidden lg:flex flex-1 justify-center items-start pt-32" style={{ backgroundColor: 'var(--accent-primary)' }}>
         <div className="max-w-md text-center" style={{ color: 'white' }}>
           <h2 className="text-3xl font-bold">Welcome Back!</h2>
           <p className="mt-4">
