@@ -21,7 +21,7 @@ export default function App() {
 
 
   return (
-    <div className="min-h-screen flex flex-col">
+    <div className="flex flex-col">
       <main className="flex-1">
         <Routes>
           <Route

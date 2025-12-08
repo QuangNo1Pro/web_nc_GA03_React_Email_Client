@@ -87,9 +87,46 @@ export const emailProviders: Record<string, ProviderConfig> = {
   },
 };
 
+// Education email domains (Google Workspace for Education)
+const educationDomains = [
+  'student.hcmus.edu.vn', // HCMUS
+  'hcmus.edu.vn',
+  'fit.hcmus.edu.vn',
+  'student.ptithcm.edu.vn', // PTIT HCM
+  'ptithcm.edu.vn',
+  'student.uit.edu.vn', // UIT
+  'gm.uit.edu.vn',
+  'student.hcmut.edu.vn', // HCMUT
+  'hcmut.edu.vn',
+  'stu.edu.vn', // Trường khác
+];
+
+const educationConfig: ProviderConfig = {
+  name: 'Email Giáo Dục (Google Workspace)',
+  imapHost: 'imap.gmail.com',
+  imapPort: 993,
+  smtpHost: 'smtp.gmail.com',
+  smtpPort: 587,
+  appPasswordUrl: '',
+  instructions: [
+    'Email giáo dục dùng Google Workspace cho trường học',
+    'Không thể tạo App Password như Gmail thông thường',
+    'Bạn CẦN DÙNG MẬT KHẨU ĐĂNG NHẬP EMAIL THÔNG THƯỜNG',
+    'Nhập email sinh viên (vd: 21120xxx@student.hcmus.edu.vn)',
+    'Nhập mật khẩu đăng nhập email của trường',
+    'Nếu bị lỗi xác thực, liên hệ IT trường để bật IMAP',
+    'Một số trường yêu cầu bật "Less secure app access" hoặc cấu hình đặc biệt',
+  ],
+};
+
 export function detectProvider(email: string): ProviderConfig | null {
   const domain = email.split('@')[1]?.toLowerCase();
   if (!domain) return null;
+  
+  // Check education domains first
+  if (educationDomains.includes(domain)) {
+    return educationConfig;
+  }
   
   return emailProviders[domain] || null;
 }

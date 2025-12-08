@@ -4,19 +4,20 @@ export interface UserDocument extends Document {
   email: string;
   password?: string;
   googleId?: string;
-  googleAccessToken?: string;
+  googleAccessToken?: string; // Used for XOAUTH2 IMAP/SMTP if provider='google'
   googleRefreshToken?: string;
-  picture?: string;     // ✔ ADD
-  name?: string;        // ✔ ADD
+  picture?: string;
+  name?: string;
   refreshToken?: string;
-  lastHistoryId?: string; // ✔ ADD for incremental sync
-  provider?: string; // 'google' or 'imap' or 'local'
+  lastHistoryId?: string; // for incremental sync
+  provider?: string; // 'google' (OAuth + optionally IMAP), 'imap' (password-based), or 'local'
   imapConfig?: {
     host: string;
     port: number;
     tls?: boolean;
+    user?: string;
   };
-  imapPassword?: string; // encrypted
+  imapPassword?: string; // encrypted password for IMAP (only if provider='imap')
   smtpConfig?: {
     host: string;
     port: number;
@@ -39,11 +40,11 @@ export const UserSchema = new Schema(
 
     googleId: { type: String, required: false, unique: true, sparse: true },
 
-    googleAccessToken: { type: String, required: false },
+    googleAccessToken: { type: String, required: false }, // Also used for XOAUTH2
     googleRefreshToken: { type: String, required: false },
 
     // -------------------------
-    // NEW: GOOGLE PROFILE FIELDS
+    // PROFILE FIELDS
     // -------------------------
     picture: { type: String, required: false },
     name: { type: String, required: false },
@@ -51,14 +52,22 @@ export const UserSchema = new Schema(
     refreshToken: { type: String, required: false },
     lastHistoryId: { type: String, required: false }, // for incremental sync
 
+    // -------------------------
+    // PROVIDER & IMAP CONFIG
+    // -------------------------
+    // provider can be:
+    // - 'google': OAuth2 login, can use googleAccessToken for XOAUTH2 IMAP/SMTP
+    // - 'imap': Traditional IMAP with username/password
+    // - 'local': Email+password only (no mail access)
     provider: { type: String, required: false, enum: ['google', 'imap', 'local'] },
     
     imapConfig: {
       host: { type: String, required: false },
       port: { type: Number, required: false },
       tls: { type: Boolean, default: true },
+      user: { type: String, required: false },
     },
-    imapPassword: { type: String, required: false },
+    imapPassword: { type: String, required: false }, // encrypted, only for provider='imap'
     
     smtpConfig: {
       host: { type: String, required: false },

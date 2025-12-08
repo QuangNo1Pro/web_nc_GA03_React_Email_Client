@@ -5,7 +5,8 @@ import * as Imap from 'imap-simple';
 
 interface ImapConfig {
   user: string;
-  password: string;
+  password?: string;
+  accessToken?: string; // For XOAUTH2
   host: string;
   port: number;
   tls?: boolean;
@@ -28,17 +29,29 @@ interface Email {
 export class ImapService {
   async connectImap(config: ImapConfig) {
     try {
+      const imapConfig: any = {
+        user: config.user,
+        host: config.host,
+        port: config.port,
+        tls: config.tls !== false,
+        tlsOptions: { rejectUnauthorized: false },
+        authTimeout: 10000,
+        connTimeout: 10000,
+      };
+
+      // Use XOAUTH2 if accessToken is provided, otherwise use password
+      if (config.accessToken) {
+        // Format XOAUTH2 string properly for Gmail
+        const xoauth2String = this.buildXOAuth2String(config.user, config.accessToken);
+        imapConfig.xoauth2 = xoauth2String;
+      } else if (config.password) {
+        imapConfig.password = config.password;
+      } else {
+        throw new Error('Either password or accessToken must be provided');
+      }
+
       const connection = await Imap.connect({
-        imap: {
-          user: config.user,
-          password: config.password,
-          host: config.host,
-          port: config.port,
-          tls: config.tls !== false,
-          tlsOptions: { rejectUnauthorized: false },
-          authTimeout: 10000,
-          connTimeout: 10000,
-        },
+        imap: imapConfig,
       });
       return connection;
     } catch (error) {
@@ -89,8 +102,6 @@ export class ImapService {
       } else {
         await connection.delFlags(uid, ['\\Seen']);
       }
-      
-      console.log(`[IMAP] Successfully marked email ${uid} as ${read ? 'read' : 'unread'}`);
     } catch (error) {
       console.error('[IMAP] Error marking as read:', error);
       throw error;
@@ -106,8 +117,6 @@ export class ImapService {
       } else {
         await connection.delFlags(uid, ['\\Flagged']);
       }
-      
-      console.log(`[IMAP] Successfully ${starred ? 'starred' : 'unstarred'} email ${uid}`);
     } catch (error) {
       console.error('[IMAP] Error toggling star:', error);
       throw error;
@@ -119,8 +128,6 @@ export class ImapService {
       await connection.openBox(mailbox, false); // false = writable mode
       await connection.addFlags(uid, ['\\Deleted']);
       await connection.expunge();
-      
-      console.log(`[IMAP] Successfully deleted email ${uid}`);
     } catch (error) {
       console.error('[IMAP] Error deleting email:', error);
       throw error;
@@ -142,16 +149,28 @@ export class ImapService {
         port: config.port,
         secure: config.tls !== false,
         user: config.user,
+        authType: config.accessToken ? 'XOAUTH2' : 'password',
       });
+
+      const authConfig: any = {
+        user: config.user,
+      };
+
+      // Use XOAUTH2 if accessToken is provided, otherwise use password
+      if (config.accessToken) {
+        authConfig.type = 'OAuth2';
+        authConfig.accessToken = config.accessToken;
+      } else if (config.password) {
+        authConfig.pass = config.password;
+      } else {
+        throw new Error('Either password or accessToken must be provided');
+      }
 
       const transporter = nodemailer.createTransport({
         host: config.host,
         port: config.port,
         secure: config.port === 465, // Use secure for port 465, STARTTLS for 587
-        auth: {
-          user: config.user,
-          pass: config.password,
-        },
+        auth: authConfig,
         tls: {
           rejectUnauthorized: false, // Allow self-signed certificates
         },
@@ -160,9 +179,7 @@ export class ImapService {
       // Verify connection
       try {
         await transporter.verify();
-        console.log('[IMAP Service] ✅ SMTP connection verified');
       } catch (verifyError: any) {
-        console.error('[IMAP Service] ❌ SMTP verification failed:', verifyError.message);
         throw new Error(`SMTP verification failed: ${verifyError.message}`);
       }
 
@@ -177,26 +194,12 @@ export class ImapService {
       if (cc) mailOptions.cc = cc;
       if (bcc) mailOptions.bcc = bcc;
 
-      console.log('[IMAP Service] Sending email...', {
-        from: mailOptions.from,
-        to: mailOptions.to,
-        subject: mailOptions.subject,
-      });
-
       const result = await transporter.sendMail(mailOptions);
       await transporter.close();
       
-      console.log('[IMAP Service] ✅ Email sent successfully, messageId:', result.messageId);
       return { success: true, messageId: result.messageId };
     } catch (error) {
       const err = error as any;
-      console.error('[IMAP Service] ❌ Send email error:', {
-        message: err.message,
-        code: err.code,
-        command: err.command,
-        responseCode: err.responseCode,
-        response: err.response,
-      });
       throw new Error(`Failed to send email: ${err.message}`);
     }
   }
@@ -367,5 +370,12 @@ export class ImapService {
     } catch (error) {
       console.error('Error closing connection:', error);
     }
+  }
+
+  private buildXOAuth2String(user: string, accessToken: string): string {
+    // Build XOAUTH2 SASL string
+    // Format: user={user}\x01auth=Bearer {token}\x01\x01
+    const authString = `user=${user}\x01auth=Bearer ${accessToken}\x01\x01`;
+    return Buffer.from(authString).toString('base64');
   }
 }

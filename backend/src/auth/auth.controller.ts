@@ -204,7 +204,17 @@ export class AuthController {
       });
       await this.imapService.closeConnection(connection);
     } catch (error) {
-      throw new ForbiddenException('Invalid IMAP credentials or configuration');
+      const err = error as any;
+      console.error('❌ [IMAP Login] Connection failed:', {
+        email: data.email,
+        host: data.imapConfig.host,
+        port: data.imapConfig.port,
+        tls: data.imapConfig.tls,
+        error: err.message,
+        code: err.code,
+        source: err.source,
+      });
+      throw new ForbiddenException(`Invalid IMAP credentials or configuration: ${err.message || 'Unknown error'}`);
     }
 
     // Find or create user
@@ -220,12 +230,8 @@ export class AuthController {
         imapPassword: this.encryptionService.encrypt(data.password),
         smtpConfig: data.smtpConfig,
       } as any);
-      if (dbUser) {
-        console.log('[Auth] 🆕 Created new IMAP user:', dbUser.email, 'provider:', (dbUser as any).provider);
-      }
     } else {
       // Update existing user with IMAP config
-      console.log('[Auth] ♻️ Updating existing user:', dbUser.email, 'old provider:', (dbUser as any).provider);
       await this.usersService.updateImapConfig(
         dbUser._id.toString(),
         data.imapConfig,
@@ -235,10 +241,8 @@ export class AuthController {
       );
       dbUser = await this.usersService.findByEmail(data.email);
       if (dbUser) {
-        console.log('[Auth] ✅ Updated IMAP user:', dbUser.email, 'new provider:', (dbUser as any).provider);
         // Ensure provider is set to 'imap'
         if ((dbUser as any).provider !== 'imap') {
-          console.log('[Auth] ⚠️ WARNING: provider not updated! Force updating...');
           await this.usersService.updateImapConfig(
             dbUser._id.toString(),
             data.imapConfig,
@@ -247,7 +251,6 @@ export class AuthController {
             'imap',
           );
           dbUser = await this.usersService.findByEmail(data.email);
-          console.log('[Auth] 🔄 Re-fetched provider:', (dbUser as any).provider);
         }
       }
     }
@@ -283,5 +286,29 @@ export class AuthController {
     };
   }
 
+  @Post('enable-google-imap')
+  @UseGuards(AuthGuard('jwt'))
+  @HttpCode(HttpStatus.OK)
+  async enableGoogleImap(@Request() req: any) {
+    const userId = req.user.sub;
+    const dbUser = await this.usersService.findById(userId);
+
+    if (!dbUser || !(dbUser as any).googleAccessToken) {
+      throw new ForbiddenException('User must login with Google first');
+    }
+
+    await this.usersService.updateImapConfig(
+      userId,
+      { host: 'imap.gmail.com', port: 993, tls: true, user: dbUser.email },
+      '',
+      { host: 'smtp.gmail.com', port: 587, tls: true },
+      'google',
+    );
+
+    return {
+      status: 'success',
+      message: 'Google IMAP enabled successfully',
+    };
+  }
 
 }

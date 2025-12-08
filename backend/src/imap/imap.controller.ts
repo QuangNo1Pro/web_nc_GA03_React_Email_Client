@@ -30,36 +30,61 @@ export class ImapController {
   @UseGuards(JwtAuthGuard)
   async getMailboxes(@Req() req: any) {
     try {
-      console.log('[IMAP] 📬 Fetching mailboxes for user:', req.user.sub);
       const userId = req.user.sub;
       const dbUser = await this.usersService.findById(userId);
       
-      console.log('[IMAP] User found:', dbUser?.email, 'Has imapConfig:', !!(dbUser as any)?.imapConfig);
-      
       if (!dbUser || !(dbUser as any).imapConfig) {
-        console.error('[IMAP] ❌ IMAP configuration not found for user:', userId);
         throw new NotFoundException('IMAP configuration not found');
       }
 
       const imapConfig = (dbUser as any).imapConfig;
-      const encryptedPassword = (dbUser as any).imapPassword;
-      console.log('[IMAP] Config:', { host: imapConfig.host, port: imapConfig.port, user: imapConfig.user });
       
-      const password = this.encryptionService.decrypt(encryptedPassword);
-      console.log('[IMAP] Password decrypted successfully');
-
-      console.log('[IMAP] Connecting to IMAP server...');
-      const connection = await this.imapService.connectImap({
+      // Support both OAuth and password authentication
+      const connectionConfig: any = {
         user: imapConfig.user || (dbUser as any).email,
-        password,
         host: imapConfig.host,
         port: imapConfig.port,
         tls: imapConfig.tls,
-      });
-      console.log('[IMAP] Connected! Getting mailboxes...');
+      };
+
+      // Check if user has Google OAuth tokens (prioritize OAuth over password)
+      if ((dbUser as any).googleAccessToken && imapConfig.host === 'imap.gmail.com') {
+        // For OAuth, we need to ensure token is fresh
+        // Try to refresh if we have refresh token
+        if ((dbUser as any).googleRefreshToken) {
+          try {
+            // Import googleapis to refresh token
+            const { google } = require('googleapis');
+            const oauth2Client = new google.auth.OAuth2(
+              process.env.GOOGLE_CLIENT_ID,
+              process.env.GOOGLE_CLIENT_SECRET,
+              process.env.GOOGLE_CALLBACK_URL,
+            );
+            
+            oauth2Client.setCredentials({
+              access_token: (dbUser as any).googleAccessToken,
+              refresh_token: (dbUser as any).googleRefreshToken,
+            });
+
+            // This will auto-refresh if needed
+            const tokens = await oauth2Client.getAccessToken();
+            connectionConfig.accessToken = tokens.token || (dbUser as any).googleAccessToken;
+          } catch (refreshError) {
+            connectionConfig.accessToken = (dbUser as any).googleAccessToken;
+          }
+        } else {
+          connectionConfig.accessToken = (dbUser as any).googleAccessToken;
+        }
+      } else if ((dbUser as any).imapPassword) {
+        const encryptedPassword = (dbUser as any).imapPassword;
+        connectionConfig.password = this.encryptionService.decrypt(encryptedPassword);
+      } else {
+        throw new NotFoundException('No authentication method available');
+      }
+
+      const connection = await this.imapService.connectImap(connectionConfig);
 
       const boxes = await connection.getBoxes();
-      console.log('[IMAP] Got boxes:', Object.keys(boxes));
       await this.imapService.closeConnection(connection);
 
       // Map IMAP mailbox names to Gmail-style IDs
@@ -111,7 +136,6 @@ export class ImapController {
       };
 
       const mailboxes = flattenMailboxes(boxes);
-      console.log('[IMAP] Returning mailboxes:', mailboxes.map(m => `${m.id} (${m.name})`));
       return mailboxes;
     } catch (error) {
       console.error('[IMAP Controller] Error getting mailboxes:', error);
@@ -123,33 +147,33 @@ export class ImapController {
   @UseGuards(JwtAuthGuard)
   async getEmails(@Req() req: any, @Param('mailbox') mailbox: string) {
     try {
-      console.log('[IMAP] 📧 Fetching emails from mailbox:', mailbox, 'for user:', req.user.sub);
       const userId = req.user.sub;
       const dbUser = await this.usersService.findById(userId);
       
-      console.log('[IMAP] User found:', dbUser?.email, 'Has imapConfig:', !!(dbUser as any)?.imapConfig);
-      
       if (!dbUser || !(dbUser as any).imapConfig) {
-        console.error('[IMAP] ❌ IMAP configuration not found for user:', userId);
         throw new NotFoundException('IMAP configuration not found');
       }
 
       const imapConfig = (dbUser as any).imapConfig;
-      const encryptedPassword = (dbUser as any).imapPassword;
-      console.log('[IMAP] Decrypting password...');
       
-      const password = this.encryptionService.decrypt(encryptedPassword);
-      console.log('[IMAP] Password decrypted');
-
-      console.log('[IMAP] Connecting to IMAP server...');
-      const connection = await this.imapService.connectImap({
+      // Support both OAuth and password authentication
+      const connectionConfig: any = {
         user: imapConfig.user || (dbUser as any).email,
-        password,
         host: imapConfig.host,
         port: imapConfig.port,
         tls: imapConfig.tls,
-      });
-      console.log('[IMAP] Connected! Fetching emails...');
+      };
+
+      // Check if user has Google OAuth tokens (prioritize OAuth over password)
+      if ((dbUser as any).googleAccessToken && imapConfig.host === 'imap.gmail.com') {
+        connectionConfig.accessToken = (dbUser as any).googleAccessToken;
+      } else if ((dbUser as any).imapPassword) {
+        connectionConfig.password = this.encryptionService.decrypt((dbUser as any).imapPassword);
+      } else {
+        throw new NotFoundException('No authentication method available');
+      }
+
+      const connection = await this.imapService.connectImap(connectionConfig);
 
       // Map normalized ID back to real IMAP mailbox name
       const getRealMailboxName = async (normalizedId: string): Promise<string> => {
@@ -183,14 +207,9 @@ export class ImapController {
       };
 
       const realMailboxName = await getRealMailboxName(mailbox);
-      console.log('[IMAP] Normalized mailbox:', mailbox, '→ Real mailbox:', realMailboxName);
 
       const emails = await this.imapService.getEmails(connection, realMailboxName, 50);
-      console.log('[IMAP] Fetched', emails.length, 'emails');
-      console.log('[IMAP] Sample email:', emails[0]);
       await this.imapService.closeConnection(connection);
-
-      console.log('[IMAP] Returning emails to frontend...');
       return emails;
     } catch (error) {
       console.error('[IMAP Controller] Error getting emails:', error);
@@ -202,31 +221,35 @@ export class ImapController {
   @UseGuards(JwtAuthGuard)
   async getEmailDetail(@Req() req: any, @Param('mailbox') mailbox: string, @Param('uid') uid: string) {
     try {
-      console.log('[IMAP] 📧 Fetching email detail - mailbox:', mailbox, 'uid:', uid);
       const userId = req.user.sub;
       const dbUser = await this.usersService.findById(userId);
       
       if (!dbUser || !(dbUser as any).imapConfig) {
-        console.error('[IMAP] ❌ IMAP configuration not found for user:', userId);
         throw new NotFoundException('IMAP configuration not found');
       }
 
       const imapConfig = (dbUser as any).imapConfig;
-      const encryptedPassword = (dbUser as any).imapPassword;
-      const password = this.encryptionService.decrypt(encryptedPassword);
-
-      const connection = await this.imapService.connectImap({
+      
+      const connectionConfig: any = {
         user: imapConfig.user || (dbUser as any).email,
-        password,
         host: imapConfig.host,
         port: imapConfig.port,
         tls: imapConfig.tls,
-      });
+      };
+
+      if ((dbUser as any).googleAccessToken && imapConfig.host === 'imap.gmail.com') {
+        connectionConfig.accessToken = (dbUser as any).googleAccessToken;
+      } else if ((dbUser as any).imapPassword) {
+        connectionConfig.password = this.encryptionService.decrypt((dbUser as any).imapPassword);
+      } else {
+        throw new NotFoundException('No authentication method available');
+      }
+
+      const connection = await this.imapService.connectImap(connectionConfig);
 
       const emailDetail = await this.imapService.getEmailDetail(connection, mailbox, uid);
       await this.imapService.closeConnection(connection);
       
-      console.log('[IMAP] ✅ Email detail fetched:', emailDetail.subject);
       return emailDetail;
     } catch (error) {
       console.error('[IMAP Controller] Error getting email detail:', error);
@@ -251,15 +274,21 @@ export class ImapController {
       }
 
       const imapConfig = (dbUser as any).imapConfig;
-      const password = this.encryptionService.decrypt((dbUser as any).imapPassword);
-
-      const connection = await this.imapService.connectImap({
+      
+      const connectionConfig: any = {
         user: imapConfig.user || dbUser.email,
-        password,
         host: imapConfig.host,
         port: imapConfig.port,
         tls: imapConfig.tls,
-      });
+      };
+
+      if ((dbUser as any).googleAccessToken && imapConfig.host === 'imap.gmail.com') {
+        connectionConfig.accessToken = (dbUser as any).googleAccessToken;
+      } else if ((dbUser as any).imapPassword) {
+        connectionConfig.password = this.encryptionService.decrypt((dbUser as any).imapPassword);
+      }
+
+      const connection = await this.imapService.connectImap(connectionConfig);
 
       // Map normalized mailbox ID to real IMAP name
       const getRealMailboxName = async (normalizedId: string): Promise<string> => {
@@ -313,15 +342,21 @@ export class ImapController {
       }
 
       const imapConfig = (dbUser as any).imapConfig;
-      const password = this.encryptionService.decrypt((dbUser as any).imapPassword);
-
-      const connection = await this.imapService.connectImap({
+      
+      const connectionConfig: any = {
         user: imapConfig.user || dbUser.email,
-        password,
         host: imapConfig.host,
         port: imapConfig.port,
         tls: imapConfig.tls,
-      });
+      };
+
+      if ((dbUser as any).googleAccessToken && imapConfig.host === 'imap.gmail.com') {
+        connectionConfig.accessToken = (dbUser as any).googleAccessToken;
+      } else if ((dbUser as any).imapPassword) {
+        connectionConfig.password = this.encryptionService.decrypt((dbUser as any).imapPassword);
+      }
+
+      const connection = await this.imapService.connectImap(connectionConfig);
 
       // Map normalized mailbox ID to real IMAP name
       const getRealMailboxName = async (normalizedId: string): Promise<string> => {
@@ -374,15 +409,21 @@ export class ImapController {
       }
 
       const imapConfig = (dbUser as any).imapConfig;
-      const password = this.encryptionService.decrypt((dbUser as any).imapPassword);
-
-      const connection = await this.imapService.connectImap({
+      
+      const connectionConfig: any = {
         user: imapConfig.user || dbUser.email,
-        password,
         host: imapConfig.host,
         port: imapConfig.port,
         tls: imapConfig.tls,
-      });
+      };
+
+      if ((dbUser as any).googleAccessToken && imapConfig.host === 'imap.gmail.com') {
+        connectionConfig.accessToken = (dbUser as any).googleAccessToken;
+      } else if ((dbUser as any).imapPassword) {
+        connectionConfig.password = this.encryptionService.decrypt((dbUser as any).imapPassword);
+      }
+
+      const connection = await this.imapService.connectImap(connectionConfig);
 
       // Map normalized mailbox ID to real IMAP name
       const getRealMailboxName = async (normalizedId: string): Promise<string> => {
@@ -443,31 +484,27 @@ export class ImapController {
           port: 587, // Standard SMTP port with STARTTLS
           tls: true,
         };
-        console.log('[IMAP] No SMTP config found, derived from IMAP:', smtpConfig);
       }
 
-      const password = this.encryptionService.decrypt((dbUser as any).imapPassword);
-
-      console.log('[IMAP] Sending email with config:', {
+      // Prepare authentication config
+      const authConfig: any = {
         user: dbUser.email,
-        smtpHost: smtpConfig.host,
-        smtpPort: smtpConfig.port,
-        smtpTls: smtpConfig.tls,
-        to: data.to,
-        subject: data.subject,
-        hasHtml: !!data.html,
-        hasCc: !!data.cc,
-        hasBcc: !!data.bcc,
-      });
+        host: smtpConfig.host,
+        port: smtpConfig.port,
+        tls: smtpConfig.tls,
+      };
+
+      // Check if user has Google OAuth tokens (prioritize OAuth over password)
+      if ((dbUser as any).googleAccessToken && smtpConfig.host === 'smtp.gmail.com') {
+        authConfig.accessToken = (dbUser as any).googleAccessToken;
+      } else if ((dbUser as any).imapPassword) {
+        authConfig.password = this.encryptionService.decrypt((dbUser as any).imapPassword);
+      } else {
+        throw new NotFoundException('No authentication method available');
+      }
 
       const result = await this.imapService.sendEmail(
-        {
-          user: dbUser.email,
-          password,
-          host: smtpConfig.host,
-          port: smtpConfig.port,
-          tls: smtpConfig.tls,
-        },
+        authConfig,
         data.to,
         data.subject,
         data.body,
@@ -476,17 +513,8 @@ export class ImapController {
         data.bcc,
       );
 
-      console.log('[IMAP] Email sent successfully:', result);
       return result;
     } catch (error) {
-      const err = error as any;
-      console.error('[IMAP Controller] ❌ Error sending email:', {
-        message: err.message,
-        code: err.code,
-        command: err.command,
-        response: err.response,
-        stack: err.stack,
-      });
       throw error;
     }
   }

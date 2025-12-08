@@ -5,7 +5,10 @@
 ## Tính năng
 
 -   **Tích hợp Gmail thời gian thực:** Kết nối với tài khoản Gmail của bạn và hiển thị email trong giao diện bảng điều khiển 3 cột.
--   **Xác thực Google OAuth2 bảo mật:** Sử dụng luồng OAuth2 phía máy chủ an toàn để truy cập dữ liệu Gmail của bạn.
+-   **Xác thực Google OAuth2 bảo mật:** Sử dụng luồng OAuth2 Authorization Code phía máy chủ an toàn để truy cập dữ liệu Gmail của bạn.
+-   **Hỗ trợ IMAP đa nhà cung cấp:** Kết nối với Gmail, Outlook, Yahoo, iCloud và các email server khác qua IMAP/SMTP.
+-   **XOAUTH2 cho Gmail:** Sử dụng Google OAuth tokens để truy cập IMAP/SMTP mà không cần App Password.
+-   **Mã hóa thông tin đăng nhập:** Mật khẩu IMAP được mã hóa AES-256-GCM trước khi lưu trữ.
 -   **Chức năng email đầy đủ:** Đọc, soạn, trả lời, xóa, gắn dấu sao và quản lý email của bạn.
 -   **Bảo mật dựa trên Token:** Sử dụng access và refresh token JWT để giao tiếp API an toàn với proxy backend.
 -   **Tự động làm mới Token:** Tự động làm mới access token đã hết hạn mà không làm gián đoạn người dùng.
@@ -75,6 +78,8 @@
     GOOGLE_CLIENT_ID=your_google_client_id
     GOOGLE_CLIENT_SECRET=your_google_client_secret
     GOOGLE_CALLBACK_URL=http://localhost:3000/auth/google/callback
+    ENCRYPTION_KEY=your_32_character_encryption_key_for_aes256
+    BCRYPT_SALT_ROUNDS=10
     ```
 4.  **Khởi động máy chủ phát triển:**
     ```sh

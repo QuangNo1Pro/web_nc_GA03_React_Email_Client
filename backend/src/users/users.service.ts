@@ -26,9 +26,6 @@ export class UsersService {
       .findOne({ email })
       .select('+googleAccessToken +googleRefreshToken +refreshToken +provider')
       .exec();
-    if (user) {
-      console.log('[UsersService] findByEmail result - provider:', (user as any).provider);
-    }
     return user;
   }
 
@@ -37,9 +34,6 @@ export class UsersService {
       .findOne({ googleId })
       .select('+googleAccessToken +googleRefreshToken +refreshToken +provider')
       .exec();
-    if (user) {
-      console.log('[UsersService] findByGoogleId result - provider:', (user as any).provider);
-    }
     return user;
   }
 
@@ -48,9 +42,6 @@ export class UsersService {
       .findById(id)
       .select('+googleAccessToken +googleRefreshToken +refreshToken +provider')
       .exec();
-    if (user) {
-      console.log('[UsersService] findById result - provider:', (user as any).provider);
-    }
     return user;
   }
 
@@ -335,7 +326,6 @@ export class UsersService {
     // Fetch user first
     const user = await this.userModel.findById(userId).exec();
     if (!user) {
-      console.log('[UsersService] User not found:', userId);
       return null;
     }
 
@@ -349,13 +339,11 @@ export class UsersService {
 
     if (provider) {
       (user as any).provider = provider;
-      console.log('[UsersService] Setting provider to:', provider);
     }
 
     // Save document
     const result = await user.save();
     
-    console.log('[UsersService] Saved IMAP config - provider in DB:', (result as any)?.provider);
     return result;
   }
 
