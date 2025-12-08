@@ -6,6 +6,7 @@ import { useMutation } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../services/api';
 import { useAuth } from '../auth/AuthContext';
+import { detectProvider, getProviderInstructions } from '../utils/emailProviders';
 
 const schema = z.object({
   email: z.string().email({ message: 'Email không hợp lệ' }),
@@ -18,11 +19,11 @@ const imapSchema = z.object({
   email: z.string().email({ message: 'Email không hợp lệ' }),
   password: z.string().min(6, { message: 'Mật khẩu phải có ít nhất 6 ký tự' }),
   imapHost: z.string().min(1, { message: 'IMAP host không được để trống' }),
-  imapPort: z.coerce.number().min(1, { message: 'Port không hợp lệ' }),
-  imapTls: z.boolean().default(true),
+  imapPort: z.number().min(1, { message: 'Port không hợp lệ' }),
+  imapTls: z.boolean(),
   smtpHost: z.string().optional(),
-  smtpPort: z.coerce.number().optional(),
-  smtpTls: z.boolean().default(true).optional(),
+  smtpPort: z.number().optional(),
+  smtpTls: z.boolean().optional(),
 });
 
 type ImapFormValues = z.infer<typeof imapSchema>;
@@ -40,8 +41,14 @@ export default function Login() {
     register: registerImap,
     handleSubmit: handleSubmitImap,
     formState: { errors: imapErrors },
+    setValue: setImapValue,
+    watch: watchImap,
   } = useForm<ImapFormValues>({
     resolver: zodResolver(imapSchema),
+    defaultValues: {
+      imapTls: true,
+      smtpTls: true,
+    },
   });
 
   const navigate = useNavigate();
@@ -49,6 +56,28 @@ export default function Login() {
   const [serverMessage, setServerMessage] = React.useState<string | null>(null);
   const [activeTab, setActiveTab] = React.useState<'email' | 'imap'>('email');
   const [showAdvanced, setShowAdvanced] = React.useState(false);
+  const [showInstructions, setShowInstructions] = React.useState(false);
+  const [providerInstructions, setProviderInstructions] = React.useState<string[]>([]);
+  
+  const imapEmail = watchImap('email');
+
+  // Auto-fill IMAP/SMTP config when email changes
+  React.useEffect(() => {
+    if (imapEmail && imapEmail.includes('@')) {
+      const provider = detectProvider(imapEmail);
+      if (provider) {
+        setImapValue('imapHost', provider.imapHost);
+        setImapValue('imapPort', provider.imapPort);
+        setImapValue('smtpHost', provider.smtpHost);
+        setImapValue('smtpPort', provider.smtpPort);
+        setProviderInstructions(provider.instructions);
+        setShowInstructions(true);
+      } else {
+        setProviderInstructions(getProviderInstructions(imapEmail));
+        setShowInstructions(false);
+      }
+    }
+  }, [imapEmail, setImapValue]);
 
   const mutation = useMutation<any, any, FormValues, unknown>({
     mutationFn: (data: FormValues) =>
@@ -271,10 +300,60 @@ export default function Login() {
                   {imapErrors.password && <p className="text-red-500 text-sm mt-1">{imapErrors.password.message}</p>}
                 </div>
 
+                {/* App Password Instructions */}
+                {showInstructions && providerInstructions.length > 0 && (
+                  <div 
+                    className="p-4 rounded-lg border"
+                    style={{
+                      backgroundColor: 'var(--bg-hover)',
+                      borderColor: 'var(--accent-primary)',
+                      borderWidth: '1px',
+                    }}
+                  >
+                    <div className="flex items-start gap-2 mb-2">
+                      <span className="material-symbols-outlined text-sm" style={{ color: 'var(--accent-primary)' }}>
+                        info
+                      </span>
+                      <div className="flex-1">
+                        <h4 className="text-sm font-semibold mb-2" style={{ color: 'var(--text-primary)' }}>
+                          Hướng dẫn lấy App Password
+                        </h4>
+                        <ol className="text-xs space-y-1 ml-4" style={{ color: 'var(--text-secondary)', listStyleType: 'decimal' }}>
+                          {providerInstructions.map((instruction, index) => (
+                            <li key={index}>{instruction}</li>
+                          ))}
+                        </ol>
+                        {detectProvider(imapEmail)?.appPasswordUrl && (
+                          <a
+                            href={detectProvider(imapEmail)!.appPasswordUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center gap-1 mt-2 text-xs font-medium hover:underline"
+                            style={{ color: 'var(--accent-primary)' }}
+                          >
+                            <span>Mở trang cài đặt</span>
+                            <span className="material-symbols-outlined" style={{ fontSize: '14px' }}>
+                              open_in_new
+                            </span>
+                          </a>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                )}
+
                 <div>
-                  <label htmlFor="imap-host" className="block text-sm font-medium" style={{ color: 'var(--text-primary)' }}>
-                    IMAP Host
-                  </label>
+                  <div className="flex items-center justify-between mb-1">
+                    <label htmlFor="imap-host" className="block text-sm font-medium" style={{ color: 'var(--text-primary)' }}>
+                      IMAP Host
+                    </label>
+                    {showInstructions && (
+                      <span className="text-xs flex items-center gap-1" style={{ color: 'var(--accent-primary)' }}>
+                        <span className="material-symbols-outlined" style={{ fontSize: '14px' }}>check_circle</span>
+                        <span>Đã tự động điền</span>
+                      </span>
+                    )}
+                  </div>
                   <input
                     id="imap-host"
                     type="text"
@@ -292,9 +371,17 @@ export default function Login() {
                 </div>
 
                 <div>
-                  <label htmlFor="imap-port" className="block text-sm font-medium" style={{ color: 'var(--text-primary)' }}>
-                    IMAP Port
-                  </label>
+                  <div className="flex items-center justify-between mb-1">
+                    <label htmlFor="imap-port" className="block text-sm font-medium" style={{ color: 'var(--text-primary)' }}>
+                      IMAP Port
+                    </label>
+                    {showInstructions && (
+                      <span className="text-xs flex items-center gap-1" style={{ color: 'var(--accent-primary)' }}>
+                        <span className="material-symbols-outlined" style={{ fontSize: '14px' }}>check_circle</span>
+                        <span>Đã tự động điền</span>
+                      </span>
+                    )}
+                  </div>
                   <input
                     id="imap-port"
                     type="number"

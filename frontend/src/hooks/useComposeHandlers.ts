@@ -2,6 +2,7 @@ import { useState } from 'react';
 import toast from 'react-hot-toast';
 import { api } from '../services/api';
 import { useQueryClient } from '@tanstack/react-query';
+import { postSendEmail } from '../services/emailService';
 
 export function useComposeHandlers({
   composeTo,
@@ -128,7 +129,7 @@ export function useComposeHandlers({
         }),
       );
       
-      await api.post('/gmail/send', {
+      await postSendEmail({
         to: composeTo,
         cc: composeCc,
         bcc: composeBcc,

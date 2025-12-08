@@ -41,7 +41,15 @@ export const fetchEmails = async (mailboxId: string) => {
 };
 
 export const saveDraft = async (payload: any) => {
-  return api.post('/gmail/draft', payload);
+  const provider = await getUserProvider();
+  
+  if (provider === 'imap') {
+    // IMAP doesn't have draft API, just return success
+    // Drafts are saved locally in ComposeModal state
+    return { data: { success: true } };
+  } else {
+    return api.post('/gmail/draft', payload);
+  }
 };
 
 export const fetchEmail = async (emailId: string, mailbox: string = 'INBOX') => {
@@ -63,12 +71,24 @@ export const fetchEmail = async (emailId: string, mailbox: string = 'INBOX') => 
   }
 };
 
-export const patchEmailStar = async (emailId: string, starred: boolean) => {
-  return api.patch(`/gmail/emails/${emailId}/star`, { starred });
+export const patchEmailStar = async (emailId: string, starred: boolean, mailbox: string = 'INBOX') => {
+  const provider = await getUserProvider();
+  
+  if (provider === 'imap') {
+    return api.post(`/imap/emails/${mailbox}/${emailId}/star`, { starred });
+  } else {
+    return api.patch(`/gmail/emails/${emailId}/star`, { starred });
+  }
 };
 
-export const patchEmailRead = async (emailId: string, read: boolean) => {
-  return api.patch(`/gmail/emails/${emailId}/read`, { read });
+export const patchEmailRead = async (emailId: string, read: boolean, mailbox: string = 'INBOX') => {
+  const provider = await getUserProvider();
+  
+  if (provider === 'imap') {
+    return api.post(`/imap/emails/${mailbox}/${emailId}/read`, { read });
+  } else {
+    return api.patch(`/gmail/emails/${emailId}/read`, { read });
+  }
 };
 
 export const patchBulkRead = async (ids: string[], read: boolean) => {
@@ -79,8 +99,14 @@ export const patchEmailSpam = async (emailId: string) => {
   return api.patch(`/gmail/emails/${emailId}/spam`);
 };
 
-export const deleteEmail = async (emailId: string) => {
-  return api.delete(`/gmail/emails/${emailId}`);
+export const deleteEmail = async (emailId: string, mailbox: string = 'INBOX') => {
+  const provider = await getUserProvider();
+  
+  if (provider === 'imap') {
+    return api.post(`/imap/emails/${mailbox}/${emailId}/delete`);
+  } else {
+    return api.delete(`/gmail/emails/${emailId}`);
+  }
 };
 
 export const patchEmailArchive = async (emailId: string) => {
@@ -96,7 +122,13 @@ export const postGmailRefresh = async () => {
 };
 
 export const postSendEmail = async (payload: any) => {
-  return api.post('/gmail/send', payload);
+  const provider = await getUserProvider();
+  
+  if (provider === 'imap') {
+    return api.post('/imap/send', payload);
+  } else {
+    return api.post('/gmail/send', payload);
+  }
 };
 
 export const getAttachment = async (messageId: string, attachmentId: string) => {

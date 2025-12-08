@@ -599,9 +599,7 @@ export default function Inbox() {
     });
 
     try {
-      await api.patch(`/gmail/emails/${emailId}/star`, {
-        starred: newStarred,
-      });
+      await patchEmailStar(emailId, newStarred, selectedMailbox);
       // Only invalidate mailboxes for count updates, optimistic UI handles the rest
       queryClient.invalidateQueries({ queryKey: ['mailboxes'] });
       if (selectedEmail === emailId) {
@@ -648,9 +646,7 @@ export default function Inbox() {
     // Email will stay in list until manual refresh or folder change
 
     try {
-      await api.patch(`/gmail/emails/${emailId}/read`, {
-        read: newRead,
-      });
+      await patchEmailRead(emailId, newRead, selectedMailbox);
       // Only invalidate mailboxes to update unread count, NOT emails list
       queryClient.invalidateQueries({ queryKey: ['mailboxes'] });
     } catch (err) {

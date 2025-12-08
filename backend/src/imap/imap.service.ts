@@ -36,6 +36,8 @@ export class ImapService {
           port: config.port,
           tls: config.tls !== false,
           tlsOptions: { rejectUnauthorized: false },
+          authTimeout: 10000,
+          connTimeout: 10000,
         },
       });
       return connection;
@@ -78,30 +80,123 @@ export class ImapService {
 
 
 
-  async sendEmail(config: ImapConfig, to: string, subject: string, body: string, html?: string): Promise<any> {
+  async markAsRead(connection: any, mailbox: string, uid: string, read: boolean): Promise<void> {
     try {
-      const transporter = nodemailer.createTransport({
+      await connection.openBox(mailbox, false); // false = writable mode
+      
+      if (read) {
+        await connection.addFlags(uid, ['\\Seen']);
+      } else {
+        await connection.delFlags(uid, ['\\Seen']);
+      }
+      
+      console.log(`[IMAP] Successfully marked email ${uid} as ${read ? 'read' : 'unread'}`);
+    } catch (error) {
+      console.error('[IMAP] Error marking as read:', error);
+      throw error;
+    }
+  }
+
+  async toggleStar(connection: any, mailbox: string, uid: string, starred: boolean): Promise<void> {
+    try {
+      await connection.openBox(mailbox, false); // false = writable mode
+      
+      if (starred) {
+        await connection.addFlags(uid, ['\\Flagged']);
+      } else {
+        await connection.delFlags(uid, ['\\Flagged']);
+      }
+      
+      console.log(`[IMAP] Successfully ${starred ? 'starred' : 'unstarred'} email ${uid}`);
+    } catch (error) {
+      console.error('[IMAP] Error toggling star:', error);
+      throw error;
+    }
+  }
+
+  async deleteEmail(connection: any, mailbox: string, uid: string): Promise<void> {
+    try {
+      await connection.openBox(mailbox, false); // false = writable mode
+      await connection.addFlags(uid, ['\\Deleted']);
+      await connection.expunge();
+      
+      console.log(`[IMAP] Successfully deleted email ${uid}`);
+    } catch (error) {
+      console.error('[IMAP] Error deleting email:', error);
+      throw error;
+    }
+  }
+
+  async sendEmail(
+    config: ImapConfig,
+    to: string,
+    subject: string,
+    body: string,
+    html?: string,
+    cc?: string,
+    bcc?: string,
+  ): Promise<any> {
+    try {
+      console.log('[IMAP Service] Creating SMTP transporter with config:', {
         host: config.host,
         port: config.port,
         secure: config.tls !== false,
+        user: config.user,
+      });
+
+      const transporter = nodemailer.createTransport({
+        host: config.host,
+        port: config.port,
+        secure: config.port === 465, // Use secure for port 465, STARTTLS for 587
         auth: {
           user: config.user,
           pass: config.password,
         },
+        tls: {
+          rejectUnauthorized: false, // Allow self-signed certificates
+        },
       });
 
-      const result = await transporter.sendMail({
+      // Verify connection
+      try {
+        await transporter.verify();
+        console.log('[IMAP Service] ✅ SMTP connection verified');
+      } catch (verifyError: any) {
+        console.error('[IMAP Service] ❌ SMTP verification failed:', verifyError.message);
+        throw new Error(`SMTP verification failed: ${verifyError.message}`);
+      }
+
+      const mailOptions: any = {
         from: config.user,
         to,
         subject,
         text: body,
         html: html || body,
+      };
+
+      if (cc) mailOptions.cc = cc;
+      if (bcc) mailOptions.bcc = bcc;
+
+      console.log('[IMAP Service] Sending email...', {
+        from: mailOptions.from,
+        to: mailOptions.to,
+        subject: mailOptions.subject,
       });
 
+      const result = await transporter.sendMail(mailOptions);
       await transporter.close();
-      return result;
+      
+      console.log('[IMAP Service] ✅ Email sent successfully, messageId:', result.messageId);
+      return { success: true, messageId: result.messageId };
     } catch (error) {
-      const err = error as Error;
+      const err = error as any;
+      console.error('[IMAP Service] ❌ Send email error:', {
+        message: err.message,
+        code: err.code,
+        command: err.command,
+        responseCode: err.responseCode,
+        response: err.response,
+      });
       throw new Error(`Failed to send email: ${err.message}`);
     }
   }
