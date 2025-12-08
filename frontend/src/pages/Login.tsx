@@ -133,8 +133,8 @@ export default function Login() {
   };
 
   return (
-    <div className="lg:grid lg:grid-cols-2 min-h-screen" style={{ backgroundColor: 'var(--bg-primary)' }}>
-      <div className="p-4 md:p-12 overflow-y-auto" style={{ backgroundColor: 'var(--bg-secondary)', maxHeight: '100vh' }}>
+    <div className="lg:grid lg:grid-cols-2" style={{ backgroundColor: 'var(--bg-primary)' }}>
+      <div className="p-4 md:p-12" style={{ backgroundColor: 'var(--bg-secondary)' }}>
         <div className="max-w-md w-full mx-auto py-8">
           <div>
             <h2 className="mt-6 text-center text-3xl font-extrabold" style={{ color: 'var(--text-primary)' }}>
