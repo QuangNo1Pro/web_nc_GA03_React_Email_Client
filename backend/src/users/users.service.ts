@@ -22,31 +22,22 @@ export class UsersService {
   ) {}
 
   async findByEmail(email: string): Promise<UserDocument | null> {
-    const user = await this.userModel
-      .findOne({ email })
-      .select('+googleAccessToken +googleRefreshToken +refreshToken +provider')
-      .exec();
-    return user;
+    return this.userModel.findOne({ email }).exec();
   }
 
   async findByGoogleId(googleId: string) {
-    const user = await this.userModel
-      .findOne({ googleId })
-      .select('+googleAccessToken +googleRefreshToken +refreshToken +provider')
-      .exec();
-    return user;
+    return this.userModel.findOne({ googleId }).exec();
   }
 
   async findById(id: string) {
-    const user = await this.userModel
+    return this.userModel
       .findById(id)
-      .select('+googleAccessToken +googleRefreshToken +refreshToken +provider')
+      .select('+googleAccessToken +googleRefreshToken +refreshToken')
       .exec();
-    return user;
   }
 
   // ---------- NORMAL REGISTER ----------
-  async create(createUserDto: any): Promise<any> {
+  async create(createUserDto: CreateUserDto) {
     const { email, password } = createUserDto;
 
     const existing = await this.findByEmail(email);
@@ -61,17 +52,8 @@ export class UsersService {
 
     try {
       const hashed = await bcrypt.hash(password, saltRounds);
-      const created = new this.userModel({ 
-        email, 
-        password: hashed,
-        provider: createUserDto.provider || 'local',
-        imapConfig: createUserDto.imapConfig,
-        imapPassword: createUserDto.imapPassword,
-        smtpConfig: createUserDto.smtpConfig,
-      });
-      const saved = await created.save();
-      // Re-fetch to ensure all fields including provider are returned
-      return await this.findById(saved._id.toString());
+      const created = new this.userModel({ email, password: hashed });
+      return created.save();
     } catch (err: any) {
       if (err.code === 11000) {
         throw new ConflictException('Email này đã được đăng ký');
@@ -223,6 +205,34 @@ export class UsersService {
       .exec();
   }
 
+  async countUnreadByLabel(userId: string, labelId: string): Promise<number> {
+    // Special case: UNREAD label means emails that ONLY have UNREAD (not in other main folders)
+    if (labelId === 'UNREAD') {
+      return this.emailModel
+        .countDocuments({
+          userId,
+          labelIds: { $all: ['UNREAD'], $nin: ['INBOX', 'SENT', 'SPAM', 'TRASH'] }
+        })
+        .exec();
+    }
+
+    // For other labels: count emails that have both the label AND UNREAD
+    return this.emailModel
+      .countDocuments({
+        userId,
+        labelIds: { $all: [labelId, 'UNREAD'] },
+      })
+      .exec();
+  }
+
+  async updateMailboxTotal(userId: string, mailboxId: string, total: number) {
+    return this.mailboxModel.findOneAndUpdate(
+      { userId, id: mailboxId },
+      { $set: { messagesTotal: total } },
+      { new: true, upsert: true }
+    ).exec();
+  }
+
   // ---------- EMAIL ----------
   async saveEmails(userId: string, emails: any[]) {
     const ops = emails.map((email) => ({
@@ -236,6 +246,13 @@ export class UsersService {
             labelIds: email.labelIds || [],
             payload: email.payload,
             internalDate: email.internalDate,
+          },
+          // Use $setOnInsert to preserve status/snooze fields if they already exist
+          $setOnInsert: {
+            status: 'Inbox',
+            snoozed: false,
+            snoozedUntil: null,
+            snoozedFromStatus: null,
           },
         },
         upsert: true,
@@ -256,6 +273,7 @@ export class UsersService {
             { labelIds: { $nin: ['TRASH'] } },
           ],
         })
+        .select('userId messageId snippet labelIds payload internalDate status snoozed snoozedUntil snoozedFromStatus createdAt updatedAt')
         .sort({ internalDate: -1 })
         .skip(skip)
         .limit(limit)
@@ -264,6 +282,7 @@ export class UsersService {
 
     return this.emailModel
       .find({ userId, labelIds: { $in: [labelId] } })
+      .select('userId messageId snippet labelIds payload internalDate status snoozed snoozedUntil snoozedFromStatus createdAt updatedAt')
       .sort({ internalDate: -1 })
       .skip(skip)
       .limit(limit)
@@ -315,43 +334,125 @@ export class UsersService {
     return this.userModel.findByIdAndUpdate(userId, { lastHistoryId: historyId }).exec();
   }
 
-  // ---------- IMAP CONFIG ----------
-  async updateImapConfig(
-    userId: string,
-    imapConfig: any,
-    encryptedPassword: string,
-    smtpConfig?: any,
-    provider?: string,
-  ) {
-    // Fetch user first
-    const user = await this.userModel.findById(userId).exec();
-    if (!user) {
-      return null;
-    }
-
-    // Update fields directly on document
-    (user as any).imapConfig = imapConfig;
-    (user as any).imapPassword = encryptedPassword;
-    
-    if (smtpConfig) {
-      (user as any).smtpConfig = smtpConfig;
-    }
-
-    if (provider) {
-      (user as any).provider = provider;
-    }
-
-    // Save document
-    const result = await user.save();
-    
-    return result;
+  // ========== FEATURE II: KANBAN STATUS UPDATE ==========
+  async updateEmailStatus(userId: string, messageId: string, status: string) {
+    return this.emailModel
+      .findOneAndUpdate(
+        { userId, messageId },
+        { $set: { status } },
+        { new: true },
+      )
+      .exec();
   }
 
-  async getImapConfig(userId: string) {
-    const user = await this.userModel
-      .findById(userId)
-      .select('imapConfig imapPassword smtpConfig')
+  // ========== FEATURE III: SNOOZE OPERATIONS ==========
+  
+  /**
+   * Find email by messageId for snooze operations
+   */
+  async findEmailByMessageId(userId: string, messageId: string): Promise<EmailDocument | null> {
+    return this.emailModel.findOne({ userId, messageId }).exec();
+  }
+
+  /**
+   * Update email snooze metadata
+   */
+  async updateEmailSnooze(
+    userId: string,
+    messageId: string,
+    snoozed: boolean,
+    snoozedUntil: Date | null,
+    snoozedFromStatus: string | null,
+  ) {
+    const updateData: any = {
+      snoozed,
+      snoozedUntil,
+      snoozedFromStatus,
+    };
+
+    // If snoozing, also set status to 'Snoozed'
+    if (snoozed) {
+      updateData.status = 'Snoozed';
+    }
+
+    return this.emailModel
+      .findOneAndUpdate(
+        { userId, messageId },
+        { $set: updateData },
+        { new: true },
+      )
       .exec();
-    return user;
+  }
+
+  /**
+   * Find all snoozed emails for a user
+   */
+  async findSnoozedEmails(userId: string): Promise<EmailDocument[]> {
+    return this.emailModel
+      .find({ userId, snoozed: true })
+      .sort({ snoozedUntil: 1 }) // Sort by wake time (earliest first)
+      .exec();
+  }
+
+  /**
+   * Find all expired snoozed emails (for scheduler)
+   * Returns emails where snoozed=true AND snoozedUntil <= now
+   */
+  async findExpiredSnoozedEmails(): Promise<EmailDocument[]> {
+    const now = new Date();
+    return this.emailModel
+      .find({
+        snoozed: true,
+        snoozedUntil: { $lte: now },
+      })
+      .exec();
+  }
+
+  /**
+   * Get snoozed emails with full details for user
+   */
+  async getSnoozedEmailsWithDetails(userId: string) {
+    return this.emailModel
+      .find({ userId, snoozed: true })
+      .select('messageId snippet labelIds payload internalDate snoozed snoozedUntil snoozedFromStatus status')
+      .sort({ snoozedUntil: 1 })
+      .exec();
+  }
+
+  /**
+   * Update snooze time for an email
+   */
+  async updateSnoozeTime(userId: string, messageId: string, newSnoozedUntil: Date) {
+    const email = await this.emailModel.findOne({ userId, messageId }).exec();
+    
+    if (!email) {
+      throw new Error('Email not found');
+    }
+
+    if (!email.snoozed) {
+      throw new Error('Email is not snoozed');
+    }
+
+    return this.emailModel
+      .findOneAndUpdate(
+        { userId, messageId },
+        { $set: { snoozedUntil: newSnoozedUntil } },
+        { new: true }
+      )
+      .exec();
+  }
+
+  /**
+   * Generic email update helper
+   */
+  async updateEmail(userId: string, messageId: string, updates: any) {
+    return this.emailModel
+      .findOneAndUpdate(
+        { userId, messageId },
+        { $set: updates },
+        { new: true }
+      )
+      .exec();
   }
 }
+

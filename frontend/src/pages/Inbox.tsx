@@ -4,6 +4,7 @@ import React, {
   useRef,
   useMemo,
 } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
 import * as ReactWindow from 'react-window';
@@ -76,6 +77,7 @@ export default function Inbox() {
   // State for Mark as Read button hover
   const [isMarkHovered, setIsMarkHovered] = useState(false);
   const queryClient = useQueryClient();
+  const navigate = useNavigate();
   const emailListComponentRef = useRef<EmailListHandle>(null);
 
   // Store ref globally for access in handlers
@@ -88,46 +90,45 @@ export default function Inbox() {
   const { theme, toggleTheme } = useTheme();
   const [showProfileMenu, setShowProfileMenu] = useState(false);
 
-  // Debug user provider
-  useEffect(() => {
-    if (user) {
-      console.log('[Inbox] 👤 User Info:', {
-        email: user.email,
-        provider: user.provider,
-        name: user.name,
-      });
-    }
-  }, [user]);
+  // 👉 State declarations - must be before effects that use them
+  const [searchQuery, setSearchQuery] = useState("");
+  const [selectedMailbox, setSelectedMailbox] = useState('INBOX');
 
   // === Real-time email sync via SSE ===
-  // Only enable SSE for Gmail users, not IMAP
-  const isGmailUser = user?.provider !== 'imap';
-  const { isConnected: sseConnected } = useGmailSSE(isGmailUser);
+  const { isConnected: sseConnected } = useGmailSSE(true);
   
   // Debug SSE connection
   useEffect(() => {
-    console.log('[Inbox] SSE connection status:', sseConnected, '(Gmail user:', isGmailUser, ')');
-  }, [sseConnected, isGmailUser]);
+    console.log('[Inbox] SSE connection status:', sseConnected);
+  }, [sseConnected]);
+
+  // Listen for email updates from SSE (unsnooze events)
+  useEffect(() => {
+    const handleEmailUpdate = (event: any) => {
+      console.log('[Inbox] 📧 Email update received:', event.detail);
+      if (event.detail?.action === 'unsnooze') {
+        const { email, originalStatus } = event.detail;
+        console.log(`[Inbox] 🔄 Refreshing due to unsnooze: ${email?.messageId} → ${originalStatus}`);
+        
+        // Invalidate mailboxes to update counts
+        queryClient.invalidateQueries({ queryKey: ['mailboxes'] });
+        
+        // Invalidate current mailbox if it's the target
+        if (selectedMailbox === originalStatus || selectedMailbox === 'INBOX') {
+          queryClient.invalidateQueries({ queryKey: ['emails', selectedMailbox] });
+        }
+        
+        toast.success(`Email moved back to ${originalStatus}`);
+      }
+    };
+
+    window.addEventListener('email-update', handleEmailUpdate);
+    return () => window.removeEventListener('email-update', handleEmailUpdate);
+  }, [queryClient, selectedMailbox]);
 
   const handleLogout = () => {
     logout();
   };
-
-  // Show provider notification
-  useEffect(() => {
-    if (user?.provider) {
-      const providerLabel = user.provider === 'imap' ? '📧 IMAP' : '🔵 Google';
-      toast.success(`Đăng nhập thành công qua ${providerLabel}`, {
-        duration: 3000,
-      });
-    }
-  }, [user?.provider]);
-
-  // 👉 Init INBOX cho đúng id Gmail
-  const [searchQuery, setSearchQuery] = useState("");
-
-
-  const [selectedMailbox, setSelectedMailbox] = useState('INBOX');
   const [selectedEmail, setSelectedEmail] = useState<string | null>(null);
   const [mobileView, setMobileView] = useState<'emails' | 'email'>('emails');
 
@@ -287,28 +288,7 @@ export default function Inbox() {
     enabled: !!selectedMailbox,
     staleTime: 5 * 60 * 1000, // 5 minutes - prevent auto-refetch
     select: (data) => {
-      console.log('[Inbox] 📨 Raw data from fetchEmails:', { 
-        hasMessages: !!data?.messages, 
-        messageCount: data?.messages?.length,
-        firstMessage: data?.messages?.[0]
-      });
-      
-      if (!data?.messages || !Array.isArray(data.messages)) {
-        console.error('[Inbox] ❌ Invalid data structure:', data);
-        return [];
-      }
-      
-      const parsedEmails = data.messages.map((email, index) => {
-        try {
-          const parsed = parseEmail(email);
-          if (index === 0) console.log('[Inbox] ✅ First parsed email:', parsed);
-          return parsed;
-        } catch (error) {
-          console.error('[Inbox] ❌ Error parsing email:', email, error);
-          return email; // Return unparsed if parsing fails
-        }
-      });
-      
+      const parsedEmails = data.messages.map(parseEmail);
       if (selectedMailbox === 'ALL_MAIL') {
         // loại INBOX nếu cần
         return parsedEmails.filter(
@@ -321,17 +301,11 @@ export default function Inbox() {
 
   // Merge readState overrides into emails, exactly like starredState
   const emails = useMemo(() => {
-    if (!emailsRaw) {
-      console.log('[Inbox] ⚠️ emailsRaw is empty/null');
-      return [];
-    }
-    console.log('[Inbox] 📬 Processing emailsRaw:', { count: emailsRaw.length, sample: emailsRaw[0] });
-    const result = emailsRaw.map((email: any) => ({
+    if (!emailsRaw) return [];
+    return emailsRaw.map((email: any) => ({
       ...email,
       read: readState[email.id] !== undefined ? readState[email.id] : email.read,
     }));
-    console.log('[Inbox] ✅ Final emails array:', { count: result.length });
-    return result;
   }, [emailsRaw, readState]);
 
   const {
@@ -339,8 +313,8 @@ export default function Inbox() {
     isLoading: emailLoading,
     error: emailError,
   } = useQuery({
-    queryKey: ['email', selectedEmail ?? undefined, selectedMailbox],
-    queryFn: () => selectedEmail ? fetchEmail(selectedEmail, selectedMailbox) : Promise.resolve(undefined),
+    queryKey: ['email', selectedEmail ?? undefined],
+    queryFn: () => selectedEmail ? fetchEmail(selectedEmail) : Promise.resolve(undefined),
     enabled: !!selectedEmail,
   });
 
@@ -370,20 +344,17 @@ export default function Inbox() {
       const listEmail = emails?.find((e: any) => e.id === selectedEmail);
       if (!emailDetail) return listEmail || null;
 
-      // Check if this is IMAP format (has date field) or Gmail format (has headers)
-      const isImapFormat = emailDetail?.date && !emailDetail?.headers?.Date;
-      
       return {
         ...emailDetail,
         ...(listEmail || {}),
-        body: emailDetail?.body || emailDetail?.htmlBody || '',
-        attachments: isImapFormat ? (emailDetail?.attachments || []) : parseAttachments(emailDetail?.payload?.parts),
-        from: isImapFormat ? emailDetail?.from : emailDetail?.headers?.From,
-        to: isImapFormat ? emailDetail?.to : emailDetail?.headers?.To,
-        cc: isImapFormat ? emailDetail?.cc : emailDetail?.headers?.Cc,
-        bcc: isImapFormat ? emailDetail?.bcc : emailDetail?.headers?.Bcc,
-        subject: isImapFormat ? emailDetail?.subject : emailDetail?.headers?.Subject,
-        received: isImapFormat ? emailDetail?.date : emailDetail?.headers?.Date,
+        body: emailDetail?.body || '',
+        attachments: parseAttachments(emailDetail?.payload?.parts),
+        from: emailDetail?.headers?.From,
+        to: emailDetail?.headers?.To,
+        cc: emailDetail?.headers?.Cc,
+        bcc: emailDetail?.headers?.Bcc,
+        subject: emailDetail?.headers?.Subject,
+        received: emailDetail?.headers?.Date,
         // Override read state from readState for instant UI update
         read: readState[selectedEmail] !== undefined ? readState[selectedEmail] : emailDetail?.read,
       };
@@ -599,7 +570,9 @@ export default function Inbox() {
     });
 
     try {
-      await patchEmailStar(emailId, newStarred, selectedMailbox);
+      await api.patch(`/gmail/emails/${emailId}/star`, {
+        starred: newStarred,
+      });
       // Only invalidate mailboxes for count updates, optimistic UI handles the rest
       queryClient.invalidateQueries({ queryKey: ['mailboxes'] });
       if (selectedEmail === emailId) {
@@ -646,7 +619,9 @@ export default function Inbox() {
     // Email will stay in list until manual refresh or folder change
 
     try {
-      await patchEmailRead(emailId, newRead, selectedMailbox);
+      await api.patch(`/gmail/emails/${emailId}/read`, {
+        read: newRead,
+      });
       // Only invalidate mailboxes to update unread count, NOT emails list
       queryClient.invalidateQueries({ queryKey: ['mailboxes'] });
     } catch (err) {
@@ -1392,6 +1367,31 @@ export default function Inbox() {
                   onChange={(e) => setSearchQuery(e.target.value)}
                 />
               </div>
+            </div>
+
+            {/* ===== KANBAN TOGGLE BUTTON ===== */}
+            <div className="px-3 pb-2">
+              <button
+                className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-all"
+                style={{
+                  backgroundColor: 'var(--bg-secondary)',
+                  color: 'var(--accent-primary)',
+                  border: '1px solid var(--border-primary)',
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.backgroundColor = 'var(--bg-tertiary)';
+                  e.currentTarget.style.borderColor = 'var(--accent-primary)';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.backgroundColor = 'var(--bg-secondary)';
+                  e.currentTarget.style.borderColor = 'var(--border-primary)';
+                }}
+                onClick={() => navigate('/kanban')}
+                aria-label="Switch to Kanban view"
+              >
+                <span className="material-symbols-outlined text-base">view_kanban</span>
+                <span>Kanban View</span>
+              </button>
             </div>
 
             {/* ===== ACTION BAR ===== */}

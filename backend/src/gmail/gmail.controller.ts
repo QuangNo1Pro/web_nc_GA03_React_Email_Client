@@ -12,6 +12,8 @@ import {
   Res,
   Req,
   Headers,
+  BadRequestException,
+  UnauthorizedException,
 } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
 import { GmailService } from './gmail.service';
@@ -194,6 +196,36 @@ export class GmailController {
     );
   }
 
+  /**
+   * Get all snoozed emails for current user
+   * GET /gmail/emails/snoozed
+   * IMPORTANT: Must be defined BEFORE @Get('emails/:messageId') to avoid route collision
+   */
+  @Get('emails/snoozed')
+  @UseGuards(AuthGuard('jwt'))
+  async getSnoozedEmails(@Req() req: ExpressRequest) {
+    console.log('[Controller] 📥 GET /gmail/emails/snoozed - Request received');
+    console.log('[Controller] req.user:', req.user);
+    
+    const userId = (req.user as any)?.userId;
+    
+    if (!userId) {
+      console.error('[Controller] ❌ userId is undefined! req.user:', req.user);
+      throw new UnauthorizedException('User ID not found in token. Please log in again.');
+    }
+    
+    console.log('[Controller] ✅ Extracted userId:', userId);
+    
+    try {
+      const result = await this.gmailService.getSnoozedEmails(userId);
+      console.log('[Controller] ✅ Returning', result.length, 'snoozed emails');
+      return result;
+    } catch (error: any) {
+      console.error('[Controller] ❌ Error getting snoozed emails:', error.message);
+      throw error;
+    }
+  }
+
   @Get('emails/:messageId')
   @UseGuards(AuthGuard('jwt'))
   getEmail(@Request() req: ExpressRequest, @Param('messageId') messageId: string) {
@@ -278,6 +310,29 @@ export class GmailController {
   );
 }
 
+  // ========== FEATURE II: UPDATE EMAIL STATUS (KANBAN DRAG & DROP) ==========
+  @Patch('emails/:messageId/status')
+  @UseGuards(AuthGuard('jwt'))
+  async updateEmailStatus(
+    @Request() req: ExpressRequest,
+    @Param('messageId') messageId: string,
+    @Body('status') status: string,
+  ) {
+    // Validate status
+    const validStatuses = ['Inbox', 'To Do', 'In Progress', 'Done', 'Snoozed'];
+    if (!status || !validStatuses.includes(status)) {
+      throw new BadRequestException(
+        `Invalid status. Must be one of: ${validStatuses.join(', ')}`
+      );
+    }
+
+    return this.gmailService.updateEmailStatus(
+      (req.user as any).userId,
+      messageId,
+      status,
+    );
+  }
+
   @Post("emails/:id/move")
   @UseGuards(AuthGuard('jwt'))
   async moveEmail(
@@ -359,4 +414,107 @@ export class GmailController {
   refreshMailboxesAndEmails(@Request() req: ExpressRequest) {
     return this.gmailService.incrementalSync((req.user as any).userId);
   }
+
+  // ========== FEATURE III: SNOOZE / DEFERRAL MECHANISM ==========
+  
+  /**
+   * Snooze an email until a specific time
+   * POST /gmail/emails/:messageId/snooze
+   * Body: { snoozedUntil: ISO timestamp, simulate?: boolean }
+   */
+  @Post('emails/:messageId/snooze')
+  @UseGuards(AuthGuard('jwt'))
+  async snoozeEmail(
+    @Req() req: ExpressRequest,
+    @Param('messageId') messageId: string,
+    @Body('snoozedUntil') snoozedUntil: string,
+    @Body('simulate') simulate?: boolean,
+    @Query('simulate') simulateQuery?: string,
+  ) {
+    const userId = (req.user as any).userId;
+
+    // Validate required field
+    if (!snoozedUntil) {
+      throw new BadRequestException('snoozedUntil is required');
+    }
+
+    // Call service to snooze email
+    const result = await this.gmailService.snoozeEmail(userId, messageId, snoozedUntil);
+
+    // If simulate mode, schedule auto-unsnooze after short delay
+    const isSimulate = simulate === true || simulateQuery === 'true';
+    if (isSimulate) {
+      console.log(`[Snooze] Simulation mode: scheduling auto-unsnooze in 30 seconds for ${messageId}`);
+      
+      // Schedule in-memory timeout for demo (30 seconds)
+      setTimeout(async () => {
+        try {
+          console.log(`[Snooze] Auto-unsnoozing email ${messageId} (simulation)`);
+          await this.gmailService.unsnoozeEmail(userId, messageId);
+          console.log(`[Snooze] Successfully auto-unsnoozed ${messageId}`);
+        } catch (err) {
+          console.error(`[Snooze] Failed to auto-unsnooze ${messageId}:`, err);
+        }
+      }, 30000); // 30 seconds for grading demo
+    }
+
+    return result;
+  }
+
+  /**
+   * Unsnooze an email immediately (restore to original status)
+   * POST /gmail/emails/:messageId/unsnooze
+   */
+  @Post('emails/:messageId/unsnooze')
+  @UseGuards(AuthGuard('jwt'))
+  async unsnoozeEmail(
+    @Req() req: ExpressRequest,
+    @Param('messageId') messageId: string,
+  ) {
+    return this.gmailService.unsnoozeEmail(
+      (req.user as any).userId,
+      messageId,
+    );
+  }
+
+  /**
+   * Update snooze time for an email
+   * PATCH /gmail/emails/:messageId/snooze-time
+   */
+  @Patch('emails/:messageId/snooze-time')
+  @UseGuards(AuthGuard('jwt'))
+  async updateSnoozeTime(
+    @Req() req: ExpressRequest,
+    @Param('messageId') messageId: string,
+    @Body() body: { snoozedUntil: string },
+  ) {
+    const userId = (req.user as any).userId;
+    const { snoozedUntil } = body;
+
+    if (!snoozedUntil) {
+      throw new BadRequestException('snoozedUntil is required');
+    }
+
+    const newTime = new Date(snoozedUntil);
+    if (newTime <= new Date()) {
+      throw new BadRequestException('snoozedUntil must be in the future');
+    }
+
+    try {
+      const updated = await this.usersService.updateSnoozeTime(userId, messageId, newTime);
+      
+      if (!updated) {
+        throw new BadRequestException('Email not found or update failed');
+      }
+
+      return {
+        id: updated.messageId,
+        snoozedUntil: updated.snoozedUntil,
+        message: 'Snooze time updated successfully',
+      };
+    } catch (error: any) {
+      throw new BadRequestException(error.message || 'Failed to update snooze time');
+    }
+  }
 }
+

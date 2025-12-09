@@ -4,6 +4,7 @@ import Home from './pages/Home';
 import Register from './pages/Register';
 import Login from './pages/Login';
 import Inbox from './pages/Inbox';
+import Kanban from './pages/Kanban';
 import { useQueryClient } from '@tanstack/react-query';
 
 import ProtectedRoute from './components/ProtectedRoute';
@@ -41,6 +42,14 @@ export default function App() {
             element={
               <ProtectedRoute>
                 <Inbox />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/kanban"
+            element={
+              <ProtectedRoute>
+                <Kanban />
               </ProtectedRoute>
             }
           />
