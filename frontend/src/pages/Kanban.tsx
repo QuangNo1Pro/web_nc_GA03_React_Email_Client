@@ -54,6 +54,30 @@ const Kanban: React.FC = () => {
     return () => window.removeEventListener('email-update', handleEmailUpdate);
   }, [queryClient]);
 
+  // FEATURE IV: Listen for AI summary generation events
+  useEffect(() => {
+    const handleSummaryGenerated = (event: any) => {
+      console.log('[Kanban] ✨ AI Summary generated:', event.detail);
+      const { messageId, summary } = event.detail;
+      
+      // Update the email in cache with new summary
+      queryClient.setQueryData<any[]>(['kanban-emails'], (oldEmails = []) => {
+        return oldEmails.map(email => 
+          email.id === messageId 
+            ? { ...email, summary } 
+            : email
+        );
+      });
+      
+      toast.success('AI summary generated successfully', {
+        duration: 2000,
+      });
+    };
+
+    window.addEventListener('email-summary-generated', handleSummaryGenerated);
+    return () => window.removeEventListener('email-summary-generated', handleSummaryGenerated);
+  }, [queryClient]);
+
   const handleLogout = () => {
     logout();
     navigate('/login');

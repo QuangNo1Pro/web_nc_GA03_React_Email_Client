@@ -102,6 +102,10 @@ export const parseEmail = (email: any) => {
   const fromHeader = headers.find((h: any) => h.name === 'From')?.value || '';
   const subjectHeader = headers.find((h: any) => h.name === 'Subject')?.value || '';
   const dateHeader = headers.find((h: any) => h.name === 'Date')?.value || '';
+  // CRITICAL: Extract To, Cc, Bcc from headers
+  const toHeader = headers.find((h: any) => h.name === 'To')?.value || '';
+  const ccHeader = headers.find((h: any) => h.name === 'Cc')?.value || '';
+  const bccHeader = headers.find((h: any) => h.name === 'Bcc')?.value || '';
 
   let sender = "";
   const match = fromHeader.match(/^("?)([^"<]*)\1\s*<([^>]+)>$/);
@@ -125,9 +129,9 @@ export const parseEmail = (email: any) => {
     read,
     snippet,
     labelIds: email.labelIds || [],
-    to: '',
-    cc: '',
-    bcc: '',
+    to: toHeader,
+    cc: ccHeader,
+    bcc: bccHeader,
     body: '',
     attachments: [],
     status: email.status || 'Inbox', // FEATURE II: preserve status from DB

@@ -12,6 +12,9 @@ export interface EmailDocument extends Document {
   snoozed?: boolean; // Whether email is currently snoozed
   snoozedUntil?: Date; // When to wake up the email
   snoozedFromStatus?: string; // Original status before snooze (for restoration)
+  // FEATURE IV: AI Summary
+  summary?: string; // AI-generated summary (short, 1-2 sentences, max 25 words)
+  summaryGenerated?: boolean; // Track if summary was already generated (avoid re-generation)
   
   // Virtual field for clarity when calling Gmail API
   readonly gmailMessageId?: string; // Alias for messageId
@@ -31,6 +34,9 @@ export const EmailSchema = new Schema(
     snoozed: { type: Boolean, default: false },
     snoozedUntil: { type: Date, default: null },
     snoozedFromStatus: { type: String, default: null },
+    // FEATURE IV: AI Summary
+    summary: { type: String, default: null },
+    summaryGenerated: { type: Boolean, default: false, index: true },
   },
   { 
     timestamps: true,

@@ -6,12 +6,13 @@
  * FEATURE III: Snooze button integration
  */
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useDraggable } from '@dnd-kit/core';
 import { CSS } from '@dnd-kit/utilities';
 import { Email } from '../types/email';
 import { getAvatarColor } from '../utils/emailUtils';
 import SnoozeModal from './SnoozeModal';
+import { generateEmailSummary } from '../services/emailService';
 
 interface EmailCardProps {
   email: Email;
@@ -67,20 +68,6 @@ const getSenderName = (sender: string): string => {
 };
 
 /**
- * Get content preview (fallback to first 160 chars of body if no summary/snippet)
- */
-const getContentPreview = (email: Email): string => {
-  if (email.summary) return email.summary;
-  if (email.snippet) return email.snippet;
-  if (email.body) {
-    // Strip HTML tags and get first 160 characters
-    const stripped = email.body.replace(/<[^>]*>/g, '').trim();
-    return stripped.length > 160 ? stripped.substring(0, 160) + '...' : stripped;
-  }
-  return 'No content available';
-};
-
-/**
  * Navigate to Gmail to open email
  * Uses email ID to construct Gmail URL
  */
@@ -92,11 +79,19 @@ const openInGmail = (email: Email) => {
 
 const EmailCard: React.FC<EmailCardProps> = ({ email, borderColor, onSnooze }) => {
   const [showSnoozeModal, setShowSnoozeModal] = useState(false);
+  const [isGeneratingSummary, setIsGeneratingSummary] = useState(false);
+  const [localSummary, setLocalSummary] = useState(email.summary);
+  
+  // Sync localSummary when email.summary changes (from cache update)
+  useEffect(() => {
+    if (email.summary && email.summary !== localSummary) {
+      setLocalSummary(email.summary);
+    }
+  }, [email.summary]);
   
   const avatarLetter = getAvatarLetter(email.sender);
   const senderName = getSenderName(email.sender);
   const timestamp = formatTimestamp(email.timestamp);
-  const preview = getContentPreview(email);
   const avatarColorClass = getAvatarColor(senderName);
 
   // FEATURE II: Make card draggable
@@ -123,89 +118,142 @@ const EmailCard: React.FC<EmailCardProps> = ({ email, borderColor, onSnooze }) =
     setShowSnoozeModal(false);
   };
 
+  // FEATURE IV: Auto-generate summary ONLY if not exists
+  useEffect(() => {
+    // Only generate if: no summary exists AND not already generating
+    const shouldGenerate = !email.summary && !localSummary && !isGeneratingSummary;
+    
+    if (shouldGenerate) {
+      const timer = setTimeout(() => {
+        generateSummaryForEmail();
+      }, 100); // Small delay to avoid hammering API on rapid renders
+      
+      return () => clearTimeout(timer);
+    }
+  }, [email.id, email.summary]); // Only run when email ID or summary changes
+
+  // FEATURE IV: Generate summary for email
+  const generateSummaryForEmail = async () => {
+    if (isGeneratingSummary || localSummary) return;
+    
+    setIsGeneratingSummary(true);
+    try {
+      const result = await generateEmailSummary(email.id);
+      setLocalSummary(result.summary);
+      
+      // Dispatch event to update cache globally
+      window.dispatchEvent(new CustomEvent('email-summary-generated', {
+        detail: { messageId: email.id, summary: result.summary }
+      }));
+    } catch (error) {
+      console.error('[EmailCard] Failed to generate summary:', error);
+      setLocalSummary('Unable to generate summary');
+    } finally {
+      setIsGeneratingSummary(false);
+    }
+  };
+
   return (
-    <>
-      <div
-        ref={setNodeRef}
-        style={style}
-        {...attributes}
-        {...listeners}
-        className={`bg-white rounded-lg shadow-sm hover:shadow-md transition-all mb-3 border-l-4 ${borderColor} group ${
-          isDragging ? 'z-50' : ''
-        }`}
-        role="article"
-        aria-label={`Email from ${senderName}: ${email.subject}`}
-        aria-grabbed={isDragging}
-      >
-        {/* Card Header: Avatar, Sender, Timestamp */}
-        <div className="flex items-center gap-3 p-4 pb-3">
-          <div
-            className={`w-10 h-10 rounded-full flex items-center justify-center text-white font-semibold text-sm flex-shrink-0 ${avatarColorClass}`}
-            aria-hidden="true"
-          >
-            {avatarLetter}
-          </div>
-          <div className="flex-1 min-w-0">
-            <div className="font-medium text-gray-900 text-sm truncate">
-              {senderName}
-            </div>
-          </div>
-          <div className="text-xs text-gray-500 flex-shrink-0">
-            {timestamp}
+    <div
+      ref={setNodeRef}
+      style={style}
+      {...attributes}
+      {...listeners}
+      className={`bg-white rounded-lg shadow-sm hover:shadow-md transition-all mb-3 border-l-4 ${borderColor} group ${
+        isDragging ? 'z-50' : ''
+      }`}
+      role="article"
+      aria-label={`Email from ${senderName}: ${email.subject}`}
+      aria-grabbed={isDragging}
+    >
+      {/* Card Header: Avatar, Sender, Timestamp */}
+      <div className="flex items-center gap-3 p-4 pb-3">
+        <div
+          className={`w-10 h-10 rounded-full flex items-center justify-center text-white font-semibold text-sm flex-shrink-0 ${avatarColorClass}`}
+          aria-hidden="true"
+        >
+          {avatarLetter}
+        </div>
+        <div className="flex-1 min-w-0">
+          <div className="font-medium text-gray-900 text-sm truncate">
+            {senderName}
           </div>
         </div>
-
-        {/* Card Body: Subject */}
-        <div className="px-4 pb-2">
-          <h3 className="font-bold text-gray-900 text-base leading-tight line-clamp-2">
-            {email.subject || '(No subject)'}
-          </h3>
+        <div className="text-xs text-gray-500 flex-shrink-0">
+          {timestamp}
         </div>
+      </div>
 
-        {/* AI Summary Box */}
-        <div className="px-4 pb-3">
-          <div className="bg-gray-50 rounded-md p-3 border border-gray-100">
-            <div className="flex items-start gap-2">
-              <span 
-                className="material-symbols-outlined text-blue-600 text-base flex-shrink-0 mt-0.5"
-                aria-label="AI Summary"
-              >
-                auto_awesome
-              </span>
-              <div className="flex-1 min-w-0">
-                <div className="text-xs font-medium text-blue-600 mb-1">AI Summary</div>
-                <p className="text-sm text-gray-700 line-clamp-3">
-                  {preview}
+      {/* Card Body: Subject */}
+      <div className="px-4 pb-2">
+        <h3 className="font-bold text-gray-900 text-base leading-tight line-clamp-2">
+          {email.subject || '(No subject)'}
+        </h3>
+      </div>
+
+      {/* AI Summary Box */}
+      <div className="px-4 pb-3">
+        <div className="bg-gray-50 rounded-md p-3 border border-gray-100">
+          <div className="flex items-start gap-2">
+            <span className="material-symbols-outlined text-lg text-blue-600 flex-shrink-0">
+              auto_awesome
+            </span>
+            <div className="flex-1 min-w-0">
+              {localSummary ? (
+                <p 
+                  className="text-xs text-gray-600 leading-relaxed"
+                  title={localSummary} // Show full summary on hover
+                >
+                  {localSummary.length > 80 
+                    ? localSummary.substring(0, 80) + '...' 
+                    : localSummary
+                  }
                 </p>
-              </div>
+              ) : isGeneratingSummary ? (
+                <div className="flex items-center gap-2">
+                  <div className="w-3 h-3 border-2 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
+                  <span className="text-xs text-gray-500">Generating...</span>
+                </div>
+              ) : (
+                <button
+                  className="text-xs text-blue-600 hover:text-blue-700 font-medium transition-colors"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    generateSummaryForEmail();
+                  }}
+                  onPointerDown={(e) => e.stopPropagation()}
+                >
+                  ✨ Generate Summary
+                </button>
+              )}
             </div>
           </div>
         </div>
+      </div>
 
-        {/* Card Footer: Actions */}
-        <div className="flex items-center gap-2 px-4 pb-4 pt-1 border-t border-gray-100">
-          <button
-            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-gray-600 hover:bg-gray-100 rounded transition-colors"
-            onClick={handleSnoozeClick}
-            onPointerDown={(e) => e.stopPropagation()} // Prevent drag when clicking button
-            aria-label="Snooze email"
-          >
-            <span className="material-symbols-outlined text-base">schedule</span>
-            Snooze
-          </button>
-          <button
-            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-blue-600 hover:bg-blue-50 rounded transition-colors ml-auto"
-            onClick={(e) => {
-              e.stopPropagation();
-              openInGmail(email);
-            }}
-            onPointerDown={(e) => e.stopPropagation()} // Prevent drag when clicking button
-            aria-label="Open email in Gmail"
-          >
-            <span className="material-symbols-outlined text-base">open_in_new</span>
-            Open Mail
-          </button>
-        </div>
+      {/* Card Footer: Actions */}
+      <div className="flex items-center gap-2 px-4 pb-4 pt-1 border-t border-gray-100">
+        <button
+          className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-gray-600 hover:bg-gray-100 rounded transition-colors"
+          onClick={handleSnoozeClick}
+          onPointerDown={(e) => e.stopPropagation()} // Prevent drag when clicking button
+          aria-label="Snooze email"
+        >
+          <span className="material-symbols-outlined text-base">schedule</span>
+          Snooze
+        </button>
+        <button
+          className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-blue-600 hover:bg-blue-50 rounded transition-colors ml-auto"
+          onClick={(e) => {
+            e.stopPropagation();
+            openInGmail(email);
+          }}
+          onPointerDown={(e) => e.stopPropagation()} // Prevent drag when clicking button
+          aria-label="Open email in Gmail"
+        >
+          <span className="material-symbols-outlined text-base">open_in_new</span>
+          Open Mail
+        </button>
       </div>
 
       {/* FEATURE III: Snooze Modal */}
@@ -215,7 +263,7 @@ const EmailCard: React.FC<EmailCardProps> = ({ email, borderColor, onSnooze }) =
         onClose={() => setShowSnoozeModal(false)}
         onSnooze={handleSnoozeConfirm}
       />
-    </>
+    </div>
   );
 };
 

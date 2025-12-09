@@ -344,19 +344,38 @@ export default function Inbox() {
       const listEmail = emails?.find((e: any) => e.id === selectedEmail);
       if (!emailDetail) return listEmail || null;
 
+      // CRITICAL: Parse sender from payload.headers if not available as direct field
+      const parseSenderFromPayload = (email: any): string => {
+        if (email?.sender) return email.sender;
+        if (email?.from) return email.from;
+        // Parse from payload headers
+        const headers = email?.payload?.headers || [];
+        const fromHeader = headers.find((h: any) => h.name === 'From')?.value || '';
+        return fromHeader;
+      };
+
+      const senderField = parseSenderFromPayload(listEmail) || parseSenderFromPayload(emailDetail);
+
+      // CRITICAL: Build object carefully to avoid overriding with undefined values
       return {
-        ...emailDetail,
+        // Start with listEmail as base (has sender, subject, timestamp, etc.)
         ...(listEmail || {}),
-        body: emailDetail?.body || '',
+        // Add emailDetail fields that are actually populated
+        id: selectedEmail,
+        body: emailDetail?.body || listEmail?.body || '',
         attachments: parseAttachments(emailDetail?.payload?.parts),
-        from: emailDetail?.headers?.From,
-        to: emailDetail?.headers?.To,
-        cc: emailDetail?.headers?.Cc,
-        bcc: emailDetail?.headers?.Bcc,
-        subject: emailDetail?.headers?.Subject,
-        received: emailDetail?.headers?.Date,
+        // CRITICAL: Backend returns lowercase header keys (headers.from, not headers.From)
+        from: emailDetail?.headers?.from || senderField || listEmail?.from,
+        to: emailDetail?.headers?.to || listEmail?.to,
+        cc: emailDetail?.headers?.cc || listEmail?.cc,
+        bcc: emailDetail?.headers?.bcc || listEmail?.bcc,
+        subject: emailDetail?.headers?.subject || listEmail?.subject,
+        received: emailDetail?.headers?.date || listEmail?.timestamp,
+        // Preserve both sender and from for maximum compatibility
+        sender: senderField || emailDetail?.headers?.from,
+        timestamp: listEmail?.timestamp || emailDetail?.headers?.date,
         // Override read state from readState for instant UI update
-        read: readState[selectedEmail] !== undefined ? readState[selectedEmail] : emailDetail?.read,
+        read: readState[selectedEmail] !== undefined ? readState[selectedEmail] : (listEmail?.read ?? emailDetail?.read),
       };
     })();
 
@@ -1031,18 +1050,42 @@ export default function Inbox() {
 
   const handleReply = () => {
     if (!email) return;
-    // Chỉ lấy email address, không lấy tên
-    let senderEmail = email.from;
-    // Nếu có dạng "Tên <email>", chỉ lấy phần trong <>
-    const match = senderEmail.match(/<([^>]+)>/);
-    if (match) senderEmail = match[1];
-    senderEmail = senderEmail.trim();
+    
+    // CRITICAL: Try multiple sources to get sender email
+    // Priority: email.from (from headers) > email.sender (from list)
+    const fromField = email.from || email.sender || '';
+    
+    console.log('[Reply Debug] email.from:', email.from);
+    console.log('[Reply Debug] email.sender:', email.sender);
+    console.log('[Reply Debug] fromField:', fromField);
+    
+    // Dùng extractEmails để lấy địa chỉ email thuần túy
+    const senderEmails = extractEmails(fromField);
+    console.log('[Reply Debug] Extracted emails:', senderEmails);
+    
+    let senderEmail = senderEmails.length > 0 ? senderEmails[0] : '';
+    
+    // FALLBACK: If extractEmails failed, check if email.to contains our email
+    // This means WE sent the email, so reply to email.to instead
+    if (!senderEmail && email.to) {
+      const toEmails = extractEmails(email.to);
+      if (toEmails.length > 0) {
+        senderEmail = toEmails[0];
+        console.log('[Reply Debug] Using email.to as fallback:', senderEmail);
+      }
+    }
+    
+    console.log('[Reply Debug] Final senderEmail:', senderEmail);
+    
     setComposeTo(senderEmail);
     setComposeCc('');
     setComposeBcc('');
     setShowCc(false);
     setShowBcc(false);
-    setComposeSubject(`Re: ${email.subject.replace(/^Re:\s*/i, '')}`);
+    
+    // Xử lý subject với fallback
+    const subject = email.subject || '(No Subject)';
+    setComposeSubject(`Re: ${subject.replace(/^Re:\s*/i, '')}`);
     setComposeBody('');
     setEditingDraftId(null);
     setShowComposeModal(true);
@@ -1050,28 +1093,31 @@ export default function Inbox() {
 
   const handleReplyAll = () => {
     if (!email) return;
-    // Chỉ lấy email address của người gửi
-    let senderEmail = email.from;
-    const match = senderEmail.match(/<([^>]+)>/);
-    if (match) senderEmail = match[1];
-    senderEmail = senderEmail.trim();
+    
+    // Xử lý sender email với fallback
+    const fromField = email.from || email.sender || '';
+    const senderEmails = extractEmails(fromField);
+    const senderEmail = senderEmails.length > 0 ? senderEmails[0] : '';
+    
     // Reply all: gửi cho người gửi + cc
     setComposeTo(senderEmail);
+    
     if (email.cc) {
-      // Chỉ lấy email address, không lấy tên
-      const ccList = email.cc.split(',').map((e: string) => {
-        const m = e.match(/<([^>]+)>/);
-        return m ? m[1].trim() : e.trim();
-      });
-      setComposeCc(ccList.join(', '));
+      // Dùng extractEmails để lấy danh sách email thuần túy
+      const ccEmails = extractEmails(email.cc);
+      setComposeCc(ccEmails.join(', '));
       setShowCc(true);
     } else {
       setComposeCc('');
       setShowCc(false);
     }
+    
     setComposeBcc('');
     setShowBcc(false);
-    setComposeSubject(`Re: ${email.subject.replace(/^Re:\s*/i, '')}`);
+    
+    // Xử lý subject với fallback
+    const subject = email.subject || '(No Subject)';
+    setComposeSubject(`Re: ${subject.replace(/^Re:\s*/i, '')}`);
     setComposeBody('');
     setEditingDraftId(null);
     setShowComposeModal(true);
@@ -1079,10 +1125,22 @@ export default function Inbox() {
 
   const handleForward = () => {
     if (!email) return;
+    
     setComposeTo('');
-    setComposeSubject(`Fwd: ${email.subject.replace(/^Fwd:\s*/i, '')}`);
+    
+    // Xử lý subject với fallback
+    const subject = email.subject || '(No Subject)';
+    setComposeSubject(`Fwd: ${subject.replace(/^Fwd:\s*/i, '')}`);
+    
+    // Xử lý các field cho forwarded message với fallback
+    const fromField = email.from || email.sender || 'Unknown';
+    const dateValue = email.received || email.timestamp;
+    const dateStr = dateValue ? new Date(dateValue).toLocaleString('vi-VN') : 'Unknown date';
+    const toField = email.to || 'Unknown';
+    const bodyContent = email.body || email.snippet || 'No content';
+    
     setComposeBody(
-      `\n\n--- Forwarded message ---\nFrom: ${email.from}\nDate: ${new Date(email.received).toLocaleString('vi-VN')}\nSubject: ${email.subject}\nTo: ${email.to}\n\n${email.body.replace(/<[^>]*>/g, '')}`
+      `\n\n--- Forwarded message ---\nFrom: ${fromField}\nDate: ${dateStr}\nSubject: ${subject}\nTo: ${toField}\n\n${bodyContent.replace(/<[^>]*>/g, '')}`
     );
     setEditingDraftId(null);
     setShowComposeModal(true);

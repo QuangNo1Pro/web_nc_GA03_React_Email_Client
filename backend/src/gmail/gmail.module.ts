@@ -6,9 +6,10 @@ import { GmailPollingService } from './gmail-polling.service';
 import { SnoozeSchedulerService } from './snooze-scheduler.service'; // FEATURE III
 import { GmailLabelService } from './gmail-label.service'; // FEATURE III: Gmail label sync
 import { UsersModule } from '../users/users.module';
+import { SummarizationModule } from '../summarization/summarization.module'; // FEATURE IV: AI Summarization
 
 @Module({
-  imports: [UsersModule],
+  imports: [UsersModule, SummarizationModule],
   controllers: [GmailController],
   providers: [
     GmailService,

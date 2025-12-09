@@ -124,3 +124,15 @@ export const postSendEmail = async (payload: any) => {
 export const getAttachment = async (messageId: string, attachmentId: string) => {
   return api.get(`/gmail/attachments/${messageId}/${attachmentId}`);
 };
+
+// ========== FEATURE IV: AI CONTENT SUMMARIZATION ==========
+
+/**
+ * Generate AI summary for an email using OpenAI
+ * @param emailId - Email message ID
+ * @returns Object with summary and caching info
+ */
+export const generateEmailSummary = async (emailId: string) => {
+  const { data } = await api.post(`/gmail/emails/${emailId}/summary`);
+  return data;
+};

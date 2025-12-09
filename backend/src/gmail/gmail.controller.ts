@@ -325,6 +325,19 @@ export class GmailController {
   );
 }
 
+  // FEATURE IV: AI Content Summarization
+  @Post('emails/:id/summary')
+  @UseGuards(AuthGuard('jwt'))
+  async generateEmailSummary(
+    @Request() req: ExpressRequest,
+    @Param('id') id: string,
+  ) {
+    return this.gmailService.generateEmailSummary(
+      (req.user as any).userId,
+      id,
+    );
+  }
+
   @Post('draft')
   @UseGuards(AuthGuard('jwt'))
   async saveDraft(

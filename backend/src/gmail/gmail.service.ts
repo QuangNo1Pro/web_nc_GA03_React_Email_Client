@@ -12,6 +12,7 @@ import { UsersService } from '../users/users.service';
 import { ConfigService } from '@nestjs/config';
 import { SseService } from './sse.service';
 import { GmailLabelService } from './gmail-label.service'; // FEATURE III: Gmail sync
+import { SummarizationService } from '../summarization/summarization.service'; // FEATURE IV: AI Summarization
 // ...existing code...
 
 
@@ -97,6 +98,7 @@ export class GmailService {
     private readonly sseService: SseService,
     @Inject(forwardRef(() => GmailLabelService))
     private readonly gmailLabelService: GmailLabelService, // FEATURE III: Gmail sync
+    private readonly summarizationService: SummarizationService, // FEATURE IV: AI Summarization
   ) { }
 
   private async getGmailClient(userId: string) {
@@ -946,6 +948,133 @@ await gmail.users.messages.modify({
 
   return { success: true };
 }
+
+  // FEATURE IV: AI Content Summarization
+  /**
+   * Generate AI summary for an email
+   * CRITICAL: Only generates if summary doesn't exist yet
+   * @param userId - User ID
+   * @param messageId - Email message ID
+   * @returns Object with summary and email details
+   */
+  async generateEmailSummary(userId: string, messageId: string) {
+    this.logger.log(`[AI Summary] Generating summary for email ${messageId}`);
+
+    // 1. Fetch email from database
+    const email = await this.usersService.findEmailByMessageId(userId, messageId);
+    
+    if (!email) {
+      throw new BadRequestException('Email not found in database');
+    }
+
+    // 2. CRITICAL: Check if summary already exists (avoid re-generation)
+    if (email.summary && email.summaryGenerated) {
+      this.logger.log(`[AI Summary] ✅ Summary already exists (cached), returning`);
+      return {
+        messageId: email.messageId,
+        summary: email.summary,
+        cached: true,
+      };
+    }
+
+    // 3. Extract FULL email body (not snippet!)
+    let emailBody = await this.extractFullEmailBody(email);
+
+    // 4. Clean HTML and extract plain text
+    const cleanedText = this.summarizationService.cleanHtmlToText(emailBody);
+
+    // CRITICAL: Validate minimum content length (100 chars for meaningful summary)
+    if (!cleanedText || cleanedText.trim().length < 100) {
+      this.logger.warn(
+        `[AI Summary] ❌ Email body too short (${cleanedText?.length || 0} chars). Minimum 100 chars required.`
+      );
+      
+      // Return meaningful rejection message instead of using snippet
+      const summary = 'Email không có đủ nội dung để tóm tắt.';
+      email.summary = summary;
+      email.summaryGenerated = true;
+      await email.save();
+      
+      return {
+        messageId: email.messageId,
+        summary: summary,
+        cached: false,
+      };
+    }
+
+    emailBody = cleanedText;
+    this.logger.log(`[AI Summary] Cleaned email body length: ${emailBody.length} characters`);
+
+    // 5. Generate summary using Summarization Service
+    const summary = await this.summarizationService.summarizeEmail(emailBody);
+
+    // 6. Save summary to database (mark as generated to avoid re-processing)
+    email.summary = summary;
+    email.summaryGenerated = true;
+    await email.save();
+
+    this.logger.log(`[AI Summary] ✅ Summary generated and saved for ${messageId}`);
+
+    return {
+      messageId: email.messageId,
+      summary: summary,
+      cached: false,
+    };
+  }
+
+  /**
+   * Extract full email body from payload
+   * Handles both simple body.data and multipart/alternative structures
+   */
+  private async extractFullEmailBody(email: any): Promise<string> {
+    let bodyText = '';
+
+    // Try direct body.data first
+    if (email.payload?.body?.data) {
+      const decoded = Buffer.from(email.payload.body.data, 'base64').toString('utf-8');
+      bodyText = decoded;
+    } 
+    // Try multipart (common for Gmail)
+    else if (email.payload?.parts && Array.isArray(email.payload.parts)) {
+      bodyText = this.extractBodyFromParts(email.payload.parts);
+    }
+
+    return bodyText;
+  }
+
+  /**
+   * Recursively extract body from email parts
+   * Prioritize: text/html > text/plain
+   */
+  private extractBodyFromParts(parts: any[]): string {
+    let htmlBody = '';
+    let plainBody = '';
+
+    for (const part of parts) {
+      // Recursive search in nested parts
+      if (part.parts) {
+        const nested = this.extractBodyFromParts(part.parts);
+        if (nested) {
+          if (part.mimeType === 'text/html') htmlBody = nested;
+          else if (part.mimeType === 'text/plain') plainBody = nested;
+        }
+      }
+
+      // Direct body data
+      if (part.body?.data) {
+        const decoded = Buffer.from(part.body.data, 'base64').toString('utf-8');
+        
+        if (part.mimeType === 'text/html') {
+          htmlBody = decoded;
+        } else if (part.mimeType === 'text/plain') {
+          plainBody = decoded;
+        }
+      }
+    }
+
+    // Prefer HTML (usually has more content)
+    return htmlBody || plainBody;
+  }
 
 
   async sendEmail(

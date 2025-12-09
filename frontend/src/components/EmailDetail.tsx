@@ -58,15 +58,29 @@ const EmailDetail: React.FC<EmailDetailProps> = ({
 
   // Parse sender name and email
   const parseSender = () => {
-    if (!email.from) return { name: "Unknown", email: "" };
-    const match = email.from.match(/^("?)([^"<]*)\1\s*<([^>]+)>$/);
+    // Use email.from if available (from detail API), otherwise fallback to email.sender (from list)
+    const senderField = email.from || email.sender;
+    
+    if (!senderField) return { name: "Unknown Sender", email: "" };
+    
+    // Extract email using extractEmails helper for reliability
+    const emails = extractEmails(senderField);
+    const emailAddress = emails.length > 0 ? emails[0] : "";
+    
+    // Extract name from "Name <email>" format
+    const match = senderField.match(/^("?)([^"<]*)\1\s*<([^>]+)>$/);
     if (match) {
-      return { name: match[2].trim() || match[3].split('@')[0], email: match[3].trim() };
+      const name = match[2].trim() || match[3].split('@')[0];
+      return { name, email: emailAddress };
     }
-    if (email.from.includes("@")) {
-      return { name: email.from.split("@")[0], email: email.from };
+    
+    // If it's just an email address
+    if (emailAddress) {
+      return { name: emailAddress.split("@")[0], email: emailAddress };
     }
-    return { name: email.from, email: "" };
+    
+    // Fallback: it's probably just a name without email
+    return { name: senderField, email: "" };
   };
 
   const sender = parseSender();
@@ -115,9 +129,11 @@ const EmailDetail: React.FC<EmailDetailProps> = ({
                     {sender.name}
                   </h3>
                 </div>
-                <div className="text-sm mb-2" style={{ color: 'var(--text-tertiary)' }}>
-                  {sender.email}
-                </div>
+                {/* {sender.email && (
+                  <div className="text-sm mb-2" style={{ color: 'var(--text-tertiary)' }}>
+                    {sender.email}
+                  </div>
+                )} */}
                 <div className="text-xs flex items-center gap-2" style={{ color: 'var(--text-secondary)' }}>
                   <span className="font-medium">Đến: </span>
                   <span className="whitespace-nowrap overflow-hidden text-ellipsis">
@@ -125,7 +141,7 @@ const EmailDetail: React.FC<EmailDetailProps> = ({
                       ...extractEmails(email.to || ""),
                       ...extractEmails(email.cc || ""),
                       ...(email.bcc ? extractEmails(email.bcc).map((e) => `bcc:${e}`) : [])
-                    ].join(", ")}
+                    ].join(", ") || "Không rõ"}
                   </span>
 
                 </div>
@@ -260,7 +276,20 @@ const EmailDetail: React.FC<EmailDetailProps> = ({
             <span className="material-symbols-outlined" style={{ fontSize: '16px' }}>schedule</span>
             <span>
               {(() => {
-                const date = new Date(email.received);
+                // Use email.received if available (from detail API), otherwise use email.timestamp (from list)
+                const dateValue = email.received || email.timestamp;
+                
+                if (!dateValue) {
+                  return 'Không rõ thời gian';
+                }
+                
+                const date = new Date(dateValue);
+                
+                // Check if date is valid
+                if (isNaN(date.getTime())) {
+                  return 'Không rõ thời gian';
+                }
+                
                 const weekday = date.toLocaleString('vi-VN', { weekday: 'long' }).replace(/^\w/, (c) => c.toUpperCase());
                 const dateTime = date.toLocaleString('vi-VN', {
                   day: 'numeric',
