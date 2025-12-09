@@ -174,7 +174,7 @@ const EmailRow: React.FC<EmailRowProps> = ({ index, style, data }) => {
                 maxWidth: "70%",
               }}
             >
-              {email.subject}
+              {email.subject || "(No Subject)"}
             </span>
 
             <span
@@ -205,7 +205,7 @@ const EmailRow: React.FC<EmailRowProps> = ({ index, style, data }) => {
             className="truncate mt-[2px] mb-1"
             style={{ color: "var(--text-secondary)", fontSize: "0.85rem" }}
           >
-            {email.preview}
+            {email.snippet || email.preview || ""}
           </div>
         </div>
       </div>
