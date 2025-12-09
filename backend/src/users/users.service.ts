@@ -84,6 +84,7 @@ export class UsersService {
         googleRefreshToken,
         picture,
         name,
+        provider: 'google', // Set provider to 'google' for OAuth users
       });
       return created.save();
     } catch (err: any) {
@@ -142,6 +143,7 @@ export class UsersService {
             googleRefreshToken,
             picture,
             name,
+            provider: 'google', // Ensure provider is set to 'google'
           },
         },
       )
@@ -162,6 +164,7 @@ export class UsersService {
             googleAccessToken,
             picture,
             name,
+            provider: 'google', // Ensure provider is set to 'google'
           },
         },
       )
@@ -452,6 +455,34 @@ export class UsersService {
         { $set: updates },
         { new: true }
       )
+      .exec();
+  }
+
+  /**
+   * Update IMAP configuration for a user
+   */
+  async updateImapConfig(
+    userId: string,
+    imapConfig: any,
+    encryptedPassword: string,
+    smtpConfig?: any,
+    provider?: string,
+  ) {
+    const updateData: any = {
+      imapConfig,
+      imapPassword: encryptedPassword,
+    };
+
+    if (smtpConfig) {
+      updateData.smtpConfig = smtpConfig;
+    }
+
+    if (provider) {
+      updateData.provider = provider;
+    }
+
+    return this.userModel
+      .findByIdAndUpdate(userId, { $set: updateData }, { new: true })
       .exec();
   }
 }
