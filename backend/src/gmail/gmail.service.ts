@@ -12,6 +12,7 @@ import { UsersService } from '../users/users.service';
 import { ConfigService } from '@nestjs/config';
 import { SseService } from './sse.service';
 import { GmailLabelService } from './gmail-label.service'; // FEATURE III: Gmail sync
+import { GeminiService } from '../ai/gemini.service'; // FEATURE IV: AI Summarization
 // ...existing code...
 
 
@@ -97,6 +98,7 @@ export class GmailService {
     private readonly sseService: SseService,
     @Inject(forwardRef(() => GmailLabelService))
     private readonly gmailLabelService: GmailLabelService, // FEATURE III: Gmail sync
+    private readonly geminiService: GeminiService, // FEATURE IV: AI Summarization
   ) { }
 
   private async getGmailClient(userId: string) {
@@ -1732,6 +1734,57 @@ await gmail.users.messages.modify({
       throw new InternalServerErrorException(
         `Failed to get snoozed emails: ${err?.message || 'Unknown error'}`
       );
+    }
+  }
+
+  // ========== FEATURE IV: AI SUMMARIZATION ==========
+
+  /**
+   * Generate AI summary for an email
+   * @param userId - User ID
+   * @param messageId - Gmail message ID
+   * @returns Updated email with summary
+   */
+  async summarizeEmail(userId: string, messageId: string) {
+    try {
+      // Check if AI service is available
+      if (!this.geminiService.isAvailable()) {
+        throw new BadRequestException('AI summarization service is not available. Please configure GEMINI_API_KEY.');
+      }
+
+      // Get email details
+      const emailData = await this.getEmail(userId, messageId);
+      
+      if (!emailData.body) {
+        throw new BadRequestException('Email has no content to summarize');
+      }
+
+      const subject = emailData.headers?.subject || '(No subject)';
+      
+      // Generate summary using Gemini AI
+      this.logger.log(`📝 Generating summary for email: ${messageId}`);
+      const summary = await this.geminiService.summarizeEmail(emailData.body, subject);
+
+      if (!summary) {
+        throw new InternalServerErrorException('Failed to generate summary');
+      }
+
+      // Save summary to database
+      await this.usersService.updateEmail(userId, messageId, {
+        summary,
+        summarizedAt: new Date(),
+      });
+
+      this.logger.log(`✅ Summary saved for email: ${messageId}`);
+
+      return {
+        id: messageId,
+        summary,
+        summarizedAt: new Date().toISOString(),
+      };
+    } catch (error: any) {
+      this.logger.error(`❌ Error summarizing email ${messageId}:`, error.message);
+      throw error;
     }
   }
 }

@@ -12,11 +12,14 @@ import { CSS } from '@dnd-kit/utilities';
 import { Email } from '../types/email';
 import { getAvatarColor } from '../utils/emailUtils';
 import SnoozeModal from './SnoozeModal';
+import { summarizeEmail } from '../services/emailService';
+import toast from 'react-hot-toast';
 
 interface EmailCardProps {
   email: Email;
   borderColor: string; // Tailwind class for left border color
   onSnooze?: (emailId: string, snoozedUntil: string, simulate: boolean) => void;
+  onSummaryGenerated?: (emailId: string, summary: string) => void;
 }
 
 /**
@@ -90,25 +93,51 @@ const openInGmail = (email: Email) => {
   window.open(gmailUrl, '_blank', 'noopener,noreferrer');
 };
 
-const EmailCard: React.FC<EmailCardProps> = ({ email, borderColor, onSnooze }) => {
+const EmailCard: React.FC<EmailCardProps> = ({ email, borderColor, onSnooze, onSummaryGenerated }) => {
   const [showSnoozeModal, setShowSnoozeModal] = useState(false);
+  const [isGeneratingSummary, setIsGeneratingSummary] = useState(false);
+  const [localSummary, setLocalSummary] = useState(email.summary);
   
   const avatarLetter = getAvatarLetter(email.sender);
   const senderName = getSenderName(email.sender);
   const timestamp = formatTimestamp(email.timestamp);
-  const preview = getContentPreview(email);
+  const preview = localSummary || getContentPreview(email);
   const avatarColorClass = getAvatarColor(senderName);
+
+  const handleGenerateSummary = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    
+    if (isGeneratingSummary || localSummary) return;
+
+    setIsGeneratingSummary(true);
+    const loadingToast = toast.loading('🤖 Generating AI summary...');
+
+    try {
+      const result = await summarizeEmail(email.id);
+      setLocalSummary(result.summary);
+      toast.dismiss(loadingToast);
+      toast.success('✨ Summary generated!', { duration: 2000 });
+      
+      if (onSummaryGenerated) {
+        onSummaryGenerated(email.id, result.summary);
+      }
+    } catch (error: any) {
+      toast.dismiss(loadingToast);
+      toast.error(error.response?.data?.message || 'Failed to generate summary');
+    } finally {
+      setIsGeneratingSummary(false);
+    }
+  };
 
   // FEATURE II: Make card draggable
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
     id: email.id,
   });
 
-  const style = {
+  // Only set transform style when actually dragging (required for drag animation)
+  const dragStyle = transform ? {
     transform: CSS.Translate.toString(transform),
-    opacity: isDragging ? 0.5 : 1,
-    cursor: isDragging ? 'grabbing' : 'grab',
-  };
+  } : undefined;
 
   // FEATURE III: Handle snooze action
   const handleSnoozeClick = (e: React.MouseEvent) => {
@@ -127,15 +156,14 @@ const EmailCard: React.FC<EmailCardProps> = ({ email, borderColor, onSnooze }) =
     <>
       <div
         ref={setNodeRef}
-        style={style}
+        style={dragStyle}
         {...attributes}
         {...listeners}
-        className={`bg-white rounded-lg shadow-sm hover:shadow-md transition-all mb-3 border-l-4 ${borderColor} group ${
-          isDragging ? 'z-50' : ''
+        className={`bg-white rounded-lg shadow-sm hover:shadow-md transition-all mb-3 border-l-4 ${borderColor} group cursor-grab active:cursor-grabbing ${
+          isDragging ? 'z-50 opacity-50' : ''
         }`}
         role="article"
         aria-label={`Email from ${senderName}: ${email.subject}`}
-        aria-grabbed={isDragging}
       >
         {/* Card Header: Avatar, Sender, Timestamp */}
         <div className="flex items-center gap-3 p-4 pb-3">
@@ -173,7 +201,21 @@ const EmailCard: React.FC<EmailCardProps> = ({ email, borderColor, onSnooze }) =
                 auto_awesome
               </span>
               <div className="flex-1 min-w-0">
-                <div className="text-xs font-medium text-blue-600 mb-1">AI Summary</div>
+                <div className="flex items-center justify-between mb-1">
+                  <div className="text-xs font-medium text-blue-600">
+                    {localSummary ? 'AI Summary' : 'Preview'}
+                  </div>
+                  {!localSummary && (
+                    <button
+                      onClick={handleGenerateSummary}
+                      disabled={isGeneratingSummary}
+                      className="text-xs text-blue-600 hover:text-blue-700 font-medium disabled:opacity-50"
+                      title="Generate AI summary"
+                    >
+                      {isGeneratingSummary ? '...' : '✨ Summarize'}
+                    </button>
+                  )}
+                </div>
                 <p className="text-sm text-gray-700 line-clamp-3">
                   {preview}
                 </p>

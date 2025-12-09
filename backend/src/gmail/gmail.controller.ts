@@ -516,5 +516,23 @@ export class GmailController {
       throw new BadRequestException(error.message || 'Failed to update snooze time');
     }
   }
+
+  // ========== FEATURE IV: AI SUMMARIZATION ==========
+
+  /**
+   * Generate AI summary for an email
+   * POST /gmail/emails/:messageId/summarize
+   */
+  @Post('emails/:messageId/summarize')
+  @UseGuards(AuthGuard('jwt'))
+  async summarizeEmail(
+    @Req() req: ExpressRequest,
+    @Param('messageId') messageId: string,
+  ) {
+    return this.gmailService.summarizeEmail(
+      (req.user as any).userId,
+      messageId,
+    );
+  }
 }
 
