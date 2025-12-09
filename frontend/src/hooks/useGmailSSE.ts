@@ -119,6 +119,29 @@ export function useGmailSSE(enabled: boolean = true) {
                     // Force immediate refetch to get latest data from server
                     queryClient.refetchQueries({ queryKey: ['mailboxes'], type: 'active' });
                     queryClient.refetchQueries({ queryKey: ['emails'], type: 'active' });
+                    
+                    // Special handling for unsnooze: Add email to Kanban cache immediately
+                    if ((data as any).action === 'unsnooze' && (data as any).email) {
+                      const email = (data as any).email;
+                      console.log('[SSE] Adding unsnoozed email to Kanban cache:', email.id);
+                      
+                      queryClient.setQueryData(['kanban-emails'], (oldEmails: any[] = []) => {
+                        // Check if email already exists
+                        const exists = oldEmails.some(e => e.id === email.id);
+                        if (exists) {
+                          // Update existing
+                          return oldEmails.map(e => e.id === email.id ? { ...e, ...email } : e);
+                        }
+                        // Add new
+                        return [...oldEmails, email];
+                      });
+                      
+                      // Also invalidate to refresh counts
+                      queryClient.invalidateQueries({ queryKey: ['kanban-emails'] });
+                    }
+                    
+                    // Dispatch custom event for component listeners
+                    window.dispatchEvent(new CustomEvent('email-update', { detail: data }));
                   }
                 }
               } catch (err) {

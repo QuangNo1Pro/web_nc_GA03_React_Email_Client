@@ -5,17 +5,21 @@ import {
   BadRequestException,
   Inject,
   forwardRef,
+  Logger,
 } from '@nestjs/common';
 import { google, gmail_v1 } from 'googleapis';
 import { UsersService } from '../users/users.service';
 import { ConfigService } from '@nestjs/config';
 import { SseService } from './sse.service';
+import { GmailLabelService } from './gmail-label.service'; // FEATURE III: Gmail sync
 // ...existing code...
 
 
 
 @Injectable()
 export class GmailService {
+  private readonly logger = new Logger(GmailService.name);
+
   async saveDraft(
     userId: string,
     to: string,
@@ -91,6 +95,8 @@ export class GmailService {
     private readonly usersService: UsersService,
     private readonly configService: ConfigService,
     private readonly sseService: SseService,
+    @Inject(forwardRef(() => GmailLabelService))
+    private readonly gmailLabelService: GmailLabelService, // FEATURE III: Gmail sync
   ) { }
 
   private async getGmailClient(userId: string) {
@@ -235,6 +241,13 @@ export class GmailService {
               snippet: e.snippet,
               payload: e.payload,
               labelIds: e.labelIds,
+              internalDate: e.internalDate,
+              // FEATURE II & III: Include Kanban status and snooze metadata
+              // If status not set, infer from labelIds (matches frontend logic)
+              status: e.status || this.inferStatusFromLabels(e.labelIds || []),
+              snoozed: e.snoozed || false,
+              snoozedUntil: e.snoozedUntil || null,
+              snoozedFromStatus: e.snoozedFromStatus || null,
             })),
             nextPageToken: undefined,
           };
@@ -358,6 +371,7 @@ export class GmailService {
                 snippet: msg.data.snippet,
                 payload: msg.data.payload,
                 labelIds: msg.data.labelIds,
+                internalDate: msg.data.internalDate,
               };
             } catch (err) {
               console.warn(`Failed to get message details for ${message.id}:`, (err as any)?.message || err);
@@ -397,6 +411,10 @@ export class GmailService {
     if (!messageId) {
       throw new InternalServerErrorException('Message ID not provided');
     }
+    
+    // Validate Gmail messageId format (prevent "Invalid id value" error)
+    this.gmailLabelService.validateMessageId(messageId);
+    
     const gmail = await this.getGmailClient(userId);
     
     // Check if this is a draft ID (starts with 'r')
@@ -465,10 +483,31 @@ export class GmailService {
     const headerObject: { [key: string]: string } = {};
     headers.forEach((header) => {
       if (header.name && header.value) {
-        headerObject[header.name] = header.value;
+        // Normalize to lowercase for consistent access
+        headerObject[header.name.toLowerCase()] = header.value;
       }
     });
     return headerObject;
+  }
+
+  /**
+   * Infer Kanban status from Gmail labelIds
+   * CRITICAL: Must match frontend logic in useEmails.ts
+   */
+  private inferStatusFromLabels(labelIds: string[]): string {
+    // Priority order: STARRED > IMPORTANT > No INBOX (Done) > Default (Inbox)
+    if (labelIds.includes('STARRED') && labelIds.includes('INBOX')) {
+      return 'To Do';
+    }
+    if (labelIds.includes('IMPORTANT') && labelIds.includes('INBOX')) {
+      return 'In Progress';
+    }
+    // Archived: removed from INBOX (but not in TRASH/SPAM)
+    if (!labelIds.includes('INBOX') && !labelIds.includes('TRASH') && !labelIds.includes('SPAM')) {
+      return 'Done';
+    }
+    // Default to Inbox
+    return 'Inbox';
   }
 
   async setEmailStarred(
@@ -686,6 +725,109 @@ export class GmailService {
       }
       console.error('Error archiving email:', error);
       throw new InternalServerErrorException('Failed to archive email');
+    }
+  }
+
+  // ========== FEATURE II: UPDATE EMAIL STATUS (KANBAN DRAG & DROP) ==========
+  /**
+   * Updates email status for Kanban workflow management
+   * Maps status to Gmail labels and updates both Gmail API and local DB
+   * @param userId - User ID
+   * @param messageId - Email message ID
+   * @param status - New status: "Inbox" | "To Do" | "In Progress" | "Done" | "Snoozed"
+   * @returns Updated email object with new status
+   */
+  async updateEmailStatus(userId: string, messageId: string, status: string) {
+    try {
+      const gmail = await this.getGmailClient(userId);
+
+      // Map Kanban status to Gmail labels
+      // Note: Cannot add SENT/TRASH labels manually - these are system-managed
+      // Using STARRED and IMPORTANT for workflow tracking instead
+      const statusToLabelsMap: Record<string, { add: string[], remove: string[] }> = {
+        'Inbox': {
+          add: ['INBOX'],
+          remove: ['STARRED', 'IMPORTANT']
+        },
+        'To Do': {
+          add: ['STARRED', 'INBOX'],
+          remove: ['IMPORTANT']
+        },
+        'In Progress': {
+          add: ['IMPORTANT', 'INBOX'],
+          remove: ['STARRED']
+        },
+        'Done': {
+          add: [], // Archive - remove from INBOX
+          remove: ['INBOX', 'STARRED', 'IMPORTANT']
+        },
+        'Snoozed': {
+          add: ['INBOX'],
+          remove: ['STARRED', 'IMPORTANT']
+        }
+      };
+
+      const labelChanges = statusToLabelsMap[status];
+      if (!labelChanges) {
+        throw new BadRequestException(`Invalid status: ${status}`);
+      }
+
+      // Update Gmail labels
+      await gmail.users.messages.modify({
+        userId: 'me',
+        id: messageId,
+        requestBody: {
+          addLabelIds: labelChanges.add,
+          removeLabelIds: labelChanges.remove,
+        },
+      });
+
+      // Fetch updated email details
+      const updatedMessage = await gmail.users.messages.get({
+        userId: 'me',
+        id: messageId,
+        format: 'full',
+      });
+
+      // Update local DB - BOTH labels AND status
+      const updatedLabelIds = updatedMessage.data.labelIds || [];
+      
+      // Update labels
+      await this.usersService.updateEmailLabels(
+        userId,
+        messageId,
+        updatedLabelIds,
+      );
+      
+      // Update status field (CRITICAL for persistence)
+      await this.usersService.updateEmailStatus(
+        userId,
+        messageId,
+        status,
+      );
+
+      // Parse headers for sender, subject, etc.
+      const headers = this.parseHeaders(updatedMessage.data.payload?.headers || []);
+      
+      // Return email with new status
+      return {
+        id: messageId,
+        sender: headers.from || '',
+        subject: headers.subject || '(No subject)',
+        body: updatedMessage.data.payload ? this.parseBody(updatedMessage.data.payload) : '',
+        snippet: updatedMessage.data.snippet || '',
+        timestamp: parseInt(updatedMessage.data.internalDate || '0'),
+        status,
+        labelIds: updatedLabelIds,
+      };
+    } catch (err: any) {
+      console.error(`[Gmail Service] Error updating email status:`, err);
+      if (err instanceof BadRequestException) {
+        throw err;
+      }
+      throw new InternalServerErrorException(
+        `Failed to update email status: ${err?.message || 'Unknown error'}`
+      );
     }
   }
 
@@ -1238,6 +1380,361 @@ await gmail.users.messages.modify({
     } catch (err) {
       console.error(`[Gmail] Failed to process Pub/Sub notification:`, err);
       throw err;
+    }
+  }
+
+  // ========== FEATURE III: SNOOZE / DEFERRAL MECHANISM ==========
+
+  /**
+   * Snooze an email (GMAIL SYNC VERSION)
+   * @param userId - User ID
+   * @param messageId - Gmail messageId (NOT internal DB id)
+   * @param snoozedUntil - ISO timestamp when to wake up
+   * @returns Updated email object with snooze metadata
+   */
+  async snoozeEmail(userId: string, messageId: string, snoozedUntil: string) {
+    this.logger.log(`[Snooze] Starting snooze for ${messageId}`);
+    
+    try {
+      // STEP 1: Validate messageId format (prevent "Invalid id value" error)
+      this.gmailLabelService.validateMessageId(messageId);
+
+      // STEP 2: Validate snoozedUntil is in the future
+      const targetDate = new Date(snoozedUntil);
+      if (isNaN(targetDate.getTime())) {
+        throw new BadRequestException('Invalid snoozedUntil date format');
+      }
+      if (targetDate <= new Date()) {
+        throw new BadRequestException('snoozedUntil must be in the future');
+      }
+
+      // STEP 3: Get current email to save original status
+      const email = await this.usersService.findEmailByMessageId(userId, messageId);
+      if (!email) {
+        throw new BadRequestException(`Email not found in database: ${messageId}`);
+      }
+
+      const originalStatus = email.status || 'Inbox';
+      this.logger.log(`[Snooze] Original status: ${originalStatus}`);
+
+      // STEP 4: Optimistic local update first (for fast UI response)
+      await this.usersService.updateEmailSnooze(
+        userId,
+        messageId,
+        true,
+        targetDate,
+        originalStatus
+      );
+      this.logger.log(`[Snooze] ✅ Local DB updated`);
+
+      // STEP 5: Sync with Gmail (add SNOOZED label, remove INBOX)
+      // Use retry wrapper for transient errors
+      let updatedLabels: string[];
+      try {
+        updatedLabels = await this.gmailLabelService.retryWithBackoff(
+          () => this.gmailLabelService.applySnoozeLabels(userId, messageId),
+          3, // maxRetries
+          1000 // baseDelay
+        );
+        this.logger.log(`[Snooze] ✅ Gmail labels synced: ${updatedLabels.join(', ')}`);
+      } catch (gmailError: any) {
+        // ROLLBACK: Gmail sync failed, revert local changes
+        this.logger.error(`[Snooze] ❌ Gmail sync failed, rolling back: ${gmailError.message}`);
+        
+        await this.usersService.updateEmailSnooze(
+          userId,
+          messageId,
+          false,
+          null,
+          null
+        );
+        await this.usersService.updateEmailStatus(userId, messageId, originalStatus);
+        
+        this.logger.warn(`[Snooze] ⚠️ Rollback complete`);
+        
+        // Re-throw with user-friendly message
+        throw new InternalServerErrorException(
+          `Failed to sync snooze with Gmail: ${gmailError.message}. ` +
+          `Changes have been rolled back. Please try again or check your Gmail connection.`
+        );
+      }
+
+      // STEP 6: Get Gmail client and fetch full email details
+      const gmail = await this.getGmailClient(userId);
+      const updatedMessage = await gmail.users.messages.get({
+        userId: 'me',
+        id: messageId,
+        format: 'full',
+      });
+
+      const headers = this.parseHeaders(updatedMessage.data.payload?.headers || []);
+
+      // STEP 7: Update DB with full payload and labelIds to match Gmail
+      await this.usersService.updateEmail(userId, messageId, {
+        labelIds: updatedLabels,
+        payload: updatedMessage.data.payload,
+        internalDate: updatedMessage.data.internalDate,
+        snippet: updatedMessage.data.snippet,
+      });
+      this.logger.log(`[Snooze] ✅ Saved full email payload to DB`);
+
+      // STEP 8: Return updated email with snooze data
+      this.logger.log(`[Snooze] ✅ Complete for ${messageId}`);
+      return {
+        id: messageId,
+        sender: headers.from || '',
+        subject: headers.subject || '(No subject)',
+        body: updatedMessage.data.payload ? this.parseBody(updatedMessage.data.payload) : '',
+        snippet: updatedMessage.data.snippet || '',
+        timestamp: parseInt(updatedMessage.data.internalDate || '0'),
+        status: 'Snoozed',
+        labelIds: updatedLabels,
+        snoozed: true,
+        snoozedUntil: targetDate.toISOString(),
+        snoozedFromStatus: originalStatus,
+      };
+    } catch (err: any) {
+      this.logger.error(`[Snooze] Error: ${err.message}`, err.stack);
+      
+      // Re-throw known exceptions
+      if (err instanceof BadRequestException || err instanceof InternalServerErrorException) {
+        throw err;
+      }
+      
+      throw new InternalServerErrorException(
+        `Failed to snooze email: ${err?.message || 'Unknown error'}`
+      );
+    }
+  }
+
+  /**
+   * Unsnooze an email immediately (restore to original status) - GMAIL SYNC VERSION
+   * @param userId - User ID
+   * @param messageId - Gmail messageId (NOT internal DB id)
+   * @returns Updated email object
+   */
+  async unsnoozeEmail(userId: string, messageId: string) {
+    this.logger.log(`[Unsnooze] Starting unsnooze for ${messageId}`);
+    
+    try {
+      // STEP 1: Validate messageId format
+      this.gmailLabelService.validateMessageId(messageId);
+
+      // STEP 2: Get current email to retrieve original status
+      const email = await this.usersService.findEmailByMessageId(userId, messageId);
+      if (!email) {
+        throw new BadRequestException(`Email not found in database: ${messageId}`);
+      }
+
+      const restoreStatus = email.snoozedFromStatus || 'Inbox';
+      this.logger.log(`[Unsnooze] Restoring to status: ${restoreStatus}`);
+
+      // STEP 3: Optimistic local update first
+      await this.usersService.updateEmailSnooze(
+        userId,
+        messageId,
+        false,
+        null,
+        null
+      );
+      await this.usersService.updateEmailStatus(userId, messageId, restoreStatus);
+      this.logger.log(`[Unsnooze] ✅ Local DB updated`);
+
+      // STEP 4: Sync with Gmail (remove SNOOZED label, add INBOX)
+      let updatedLabels: string[];
+      try {
+        updatedLabels = await this.gmailLabelService.retryWithBackoff(
+          () => this.gmailLabelService.removeSnoozeLabels(userId, messageId),
+          3, // maxRetries
+          1000 // baseDelay
+        );
+        this.logger.log(`[Unsnooze] ✅ Gmail labels synced: ${updatedLabels.join(', ')}`);
+      } catch (gmailError: any) {
+        // ROLLBACK: Gmail sync failed, revert local changes
+        this.logger.error(`[Unsnooze] ❌ Gmail sync failed, rolling back: ${gmailError.message}`);
+        
+        await this.usersService.updateEmailSnooze(
+          userId,
+          messageId,
+          true,
+          email.snoozedUntil || new Date(),
+          email.snoozedFromStatus || restoreStatus
+        );
+        await this.usersService.updateEmailStatus(userId, messageId, 'Snoozed');
+        
+        this.logger.warn(`[Unsnooze] ⚠️ Rollback complete`);
+        
+        // Re-throw with user-friendly message
+        throw new InternalServerErrorException(
+          `Failed to sync unsnooze with Gmail: ${gmailError.message}. ` +
+          `Changes have been rolled back. Please try again or check your Gmail connection.`
+        );
+      }
+
+      // STEP 5: Update labelIds in DB to match Gmail
+      await this.usersService.updateEmail(userId, messageId, {
+        labelIds: updatedLabels,
+      });
+
+      // STEP 6: Get Gmail client and fetch full email details
+      const gmail = await this.getGmailClient(userId);
+      const updatedMessage = await gmail.users.messages.get({
+        userId: 'me',
+        id: messageId,
+        format: 'full',
+      });
+
+      const headers = this.parseHeaders(updatedMessage.data.payload?.headers || []);
+
+      // Prepare full email object for response and SSE
+      const restoredEmail = {
+        id: messageId,
+        sender: headers.from || '',
+        subject: headers.subject || '(No subject)',
+        body: updatedMessage.data.payload ? this.parseBody(updatedMessage.data.payload) : '',
+        snippet: updatedMessage.data.snippet || '',
+        timestamp: parseInt(updatedMessage.data.internalDate || '0'),
+        status: restoreStatus,
+        labelIds: updatedLabels,
+        snoozed: false,
+        snoozedUntil: null,
+        snoozedFromStatus: null,
+      };
+
+      // STEP 7: Broadcast SSE event with FULL email object for auto UI refresh
+      this.sseService.broadcast(userId, {
+        type: 'gmail-updated',
+        action: 'unsnooze',
+        email: restoredEmail, // Include full email data
+        messageId: messageId,
+        originalStatus: restoreStatus,
+        timestamp: Date.now(),
+      });
+      this.logger.log(`[Unsnooze] 📡 SSE event broadcasted to user ${userId} with full email data`);
+
+      // STEP 8: Return updated email
+      this.logger.log(`[Unsnooze] ✅ Complete for ${messageId}`);
+      return restoredEmail;
+    } catch (err: any) {
+      this.logger.error(`[Unsnooze] Error: ${err.message}`, err.stack);
+      
+      if (err instanceof BadRequestException || err instanceof InternalServerErrorException) {
+        throw err;
+      }
+      
+      throw new InternalServerErrorException(
+        `Failed to unsnooze email: ${err?.message || 'Unknown error'}`
+      );
+    }
+  }
+
+  /**
+   * Get all snoozed emails for a user
+   * @param userId - User ID
+   * @returns Array of snoozed emails
+   */
+  async getSnoozedEmails(userId: string) {
+    console.log('[Gmail Service] 🔍 getSnoozedEmails called for user:', userId);
+    
+    // CRITICAL: Validate userId first
+    if (!userId || userId === 'undefined' || userId === 'null') {
+      console.error('[Gmail Service] ❌ Invalid userId:', userId);
+      throw new BadRequestException('Invalid user ID. Please log in again.');
+    }
+    
+    try {
+      // Use getSnoozedEmailsWithDetails() to ensure full data projection
+      const snoozedEmails = await this.usersService.getSnoozedEmailsWithDetails(userId);
+      console.log('[Gmail Service] 📦 Found', snoozedEmails.length, 'snoozed emails in DB');
+      
+      if (snoozedEmails.length > 0) {
+        const sample = snoozedEmails[0];
+        const sampleHeaders = sample.payload?.headers || [];
+        console.log('[Gmail Service] Sample email from DB:', {
+          id: sample.messageId,
+          snoozedUntil: sample.snoozedUntil,
+          hasPayload: !!sample.payload,
+          headersCount: sampleHeaders.length,
+          headerNames: sampleHeaders.map((h: any) => h.name).join(', '),
+          parsedSubject: this.parseHeaders(sampleHeaders).subject,
+          parsedFrom: this.parseHeaders(sampleHeaders).from,
+          snippet: sample.snippet?.substring(0, 50),
+        });
+      }
+      
+      // Get Gmail client for fetching missing data
+      const gmail = await this.getGmailClient(userId);
+      
+      // Transform to API format and fetch missing data from Gmail
+      const result = await Promise.all(snoozedEmails.map(async (email) => {
+        // Handle missing payload or headers gracefully
+        let headers = email.payload?.headers || [];
+        let parsedHeaders = this.parseHeaders(headers);
+        
+        // If payload is missing or headers are empty, fetch from Gmail API
+        if (!email.payload || headers.length === 0 || !parsedHeaders.subject || !parsedHeaders.from) {
+          console.log(`[Gmail Service] 🔄 Fetching missing data for ${email.messageId} from Gmail API`);
+          try {
+            const gmailMessage = await gmail.users.messages.get({
+              userId: 'me',
+              id: email.messageId,
+              format: 'metadata',
+              metadataHeaders: ['From', 'To', 'Subject', 'Date'],
+            });
+            
+            console.log(`[Gmail Service] 📥 Gmail API response for ${email.messageId}:`, {
+              hasPayload: !!gmailMessage.data.payload,
+              headersCount: gmailMessage.data.payload?.headers?.length || 0,
+              headers: gmailMessage.data.payload?.headers,
+            });
+            
+            headers = gmailMessage.data.payload?.headers || [];
+            parsedHeaders = this.parseHeaders(headers);
+            
+            console.log(`[Gmail Service] 📋 Parsed headers:`, parsedHeaders);
+            
+            // Update DB with fetched payload for future requests
+            await this.usersService.updateEmail(userId, email.messageId, {
+              payload: gmailMessage.data.payload,
+              internalDate: gmailMessage.data.internalDate,
+              snippet: gmailMessage.data.snippet,
+            });
+            
+            console.log(`[Gmail Service] ✅ Updated ${email.messageId}: ${parsedHeaders.subject} from ${parsedHeaders.from}`);
+          } catch (fetchError: any) {
+            console.error(`[Gmail Service] ⚠️ Failed to fetch ${email.messageId}:`, fetchError.message);
+            // Continue with fallback values
+          }
+        }
+        
+        // Ensure we have valid data before returning
+        const sender = parsedHeaders.from || 'Unknown Sender';
+        const subject = parsedHeaders.subject || '(No subject)';
+        const snippet = email.snippet || '';
+        
+        console.log(`[Gmail Service] 📧 Email ${email.messageId}: "${subject}" from "${sender}"`);
+        
+        return {
+          id: email.messageId, // This is the Gmail messageId
+          sender: sender,
+          subject: subject,
+          snippet: snippet,
+          timestamp: parseInt(email.internalDate || '0'),
+          status: 'Snoozed',
+          labelIds: email.labelIds || [],
+          snoozed: email.snoozed,
+          snoozedUntil: email.snoozedUntil?.toISOString() || null,
+          snoozedFromStatus: email.snoozedFromStatus || 'Inbox',
+        };
+      }));
+      
+      console.log('[Gmail Service] ✅ Returning', result.length, 'transformed emails with full data');
+      return result;
+    } catch (err: any) {
+      console.error(`[Gmail Service] ❌ Error getting snoozed emails:`, err);
+      throw new InternalServerErrorException(
+        `Failed to get snoozed emails: ${err?.message || 'Unknown error'}`
+      );
     }
   }
 }

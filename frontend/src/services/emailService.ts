@@ -1,6 +1,60 @@
 export const saveDraft = async (payload: any) => {
   return api.post('/gmail/draft', payload);
 };
+
+// ========== FEATURE II: UPDATE EMAIL STATUS FOR KANBAN WORKFLOW ==========
+export const updateEmailStatus = async (emailId: string, status: string) => {
+  const { data } = await api.patch(`/gmail/emails/${emailId}/status`, { status });
+  return data;
+};
+
+// ========== FEATURE III: SNOOZE / DEFERRAL MECHANISM ==========
+
+/**
+ * Snooze an email until a specific time
+ * @param emailId - Email message ID
+ * @param snoozedUntil - ISO timestamp when to wake up
+ * @param simulate - Enable simulation mode (30s auto-unsnooze)
+ * @returns Updated email object with snooze metadata
+ */
+export const snoozeEmail = async (emailId: string, snoozedUntil: string, simulate = false) => {
+  const { data } = await api.post(
+    `/gmail/emails/${emailId}/snooze${simulate ? '?simulate=true' : ''}`,
+    { snoozedUntil, simulate }
+  );
+  return data;
+};
+
+/**
+ * Unsnooze an email immediately (restore to original status)
+ * @param emailId - Email message ID
+ * @returns Updated email object
+ */
+export const unsnoozeEmail = async (emailId: string) => {
+  const { data } = await api.post(`/gmail/emails/${emailId}/unsnooze`);
+  return data;
+};
+
+/**
+ * Get all snoozed emails for current user
+ * @returns Array of snoozed emails
+ */
+export const getSnoozedEmails = async () => {
+  const { data } = await api.get('/gmail/emails/snoozed');
+  return data;
+};
+
+/**
+ * Update snooze time for an email
+ * @param emailId - Email message ID
+ * @param snoozedUntil - New ISO timestamp when to wake up
+ * @returns Updated snooze info
+ */
+export const updateSnoozeTime = async (emailId: string, snoozedUntil: string) => {
+  const { data } = await api.patch(`/gmail/emails/${emailId}/snooze-time`, { snoozedUntil });
+  return data;
+};
+
 import { api } from './api';
 
 export const fetchMailboxes = async () => {

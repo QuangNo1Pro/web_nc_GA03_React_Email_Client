@@ -1,12 +1,14 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { MongooseModule } from '@nestjs/mongoose';
+import { ScheduleModule } from '@nestjs/schedule'; // FEATURE III: For cron jobs
 import { UsersModule } from './users/users.module';
 import { AuthModule } from './auth/auth.module';
 import { GmailModule } from './gmail/gmail.module';
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
+    ScheduleModule.forRoot(), // FEATURE III: Enable cron scheduling
     MongooseModule.forRootAsync({
       imports: [ConfigModule],
       inject: [ConfigService],

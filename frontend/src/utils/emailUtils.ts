@@ -70,16 +70,17 @@ export const extractEmails = (raw: string = "") => {
 };
 
 export const parseEmail = (email: any) => {
-  // If email is already parsed (from draft API), return as-is with minor adjustments
-  if (email.sender && email.subject !== undefined && email.timestamp && email.preview !== undefined) {
+  // If email is already parsed (from draft API or snooze API), return as-is with adjustments
+  if (email.sender && email.subject !== undefined && (email.timestamp || email.timestamp === 0) && email.snippet !== undefined) {
     return {
       id: email.id,
       sender: email.sender || '(Không có người gửi)',
       subject: email.subject || '(Không có tiêu đề)',
-      timestamp: email.timestamp,
+      // Handle both number and string timestamps
+      timestamp: typeof email.timestamp === 'number' ? email.timestamp : new Date(email.timestamp).getTime(),
       starred: email.labelIds?.includes('STARRED') || false,
       read: !email.labelIds?.includes('UNREAD'),
-      preview: email.preview || '',
+      snippet: email.snippet || '',
       labelIds: email.labelIds || [],
       to: email.to || '',
       cc: email.cc || '',
@@ -87,6 +88,11 @@ export const parseEmail = (email: any) => {
       body: email.body || '',
       attachments: email.attachments || [],
       draftId: email.draftId,
+      status: email.status || 'Inbox', // FEATURE II: preserve status
+      // FEATURE III: preserve snooze metadata
+      snoozed: email.snoozed || false,
+      snoozedUntil: email.snoozedUntil || null,
+      snoozedFromStatus: email.snoozedFromStatus || null,
     };
   }
 
@@ -105,10 +111,10 @@ export const parseEmail = (email: any) => {
     sender = fromHeader.trim();
   }
   const subject = subjectHeader;
-  const timestamp = new Date(dateHeader).toISOString();
+  const timestamp = dateHeader ? new Date(dateHeader).getTime() : 0; // ✅ Return number, not ISO string
   const starred = email.labelIds?.includes('STARRED');
   const read = !email.labelIds?.includes('UNREAD');
-  const preview = email.snippet;
+  const snippet = email.snippet || '';
 
   return {
     id: email.id,
@@ -117,12 +123,17 @@ export const parseEmail = (email: any) => {
     timestamp,
     starred,
     read,
-    preview,
+    snippet,
     labelIds: email.labelIds || [],
     to: '',
     cc: '',
     bcc: '',
     body: '',
     attachments: [],
+    status: email.status || 'Inbox', // FEATURE II: preserve status from DB
+    // FEATURE III: preserve snooze metadata from DB
+    snoozed: email.snoozed || false,
+    snoozedUntil: email.snoozedUntil || null,
+    snoozedFromStatus: email.snoozedFromStatus || null,
   };
 };

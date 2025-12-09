@@ -4,6 +4,7 @@ import React, {
   useRef,
   useMemo,
 } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
 import * as ReactWindow from 'react-window';
@@ -76,6 +77,7 @@ export default function Inbox() {
   // State for Mark as Read button hover
   const [isMarkHovered, setIsMarkHovered] = useState(false);
   const queryClient = useQueryClient();
+  const navigate = useNavigate();
   const emailListComponentRef = useRef<EmailListHandle>(null);
 
   // Store ref globally for access in handlers
@@ -88,6 +90,10 @@ export default function Inbox() {
   const { theme, toggleTheme } = useTheme();
   const [showProfileMenu, setShowProfileMenu] = useState(false);
 
+  // 👉 State declarations - must be before effects that use them
+  const [searchQuery, setSearchQuery] = useState("");
+  const [selectedMailbox, setSelectedMailbox] = useState('INBOX');
+
   // === Real-time email sync via SSE ===
   const { isConnected: sseConnected } = useGmailSSE(true);
   
@@ -96,16 +102,33 @@ export default function Inbox() {
     console.log('[Inbox] SSE connection status:', sseConnected);
   }, [sseConnected]);
 
+  // Listen for email updates from SSE (unsnooze events)
+  useEffect(() => {
+    const handleEmailUpdate = (event: any) => {
+      console.log('[Inbox] 📧 Email update received:', event.detail);
+      if (event.detail?.action === 'unsnooze') {
+        const { email, originalStatus } = event.detail;
+        console.log(`[Inbox] 🔄 Refreshing due to unsnooze: ${email?.messageId} → ${originalStatus}`);
+        
+        // Invalidate mailboxes to update counts
+        queryClient.invalidateQueries({ queryKey: ['mailboxes'] });
+        
+        // Invalidate current mailbox if it's the target
+        if (selectedMailbox === originalStatus || selectedMailbox === 'INBOX') {
+          queryClient.invalidateQueries({ queryKey: ['emails', selectedMailbox] });
+        }
+        
+        toast.success(`Email moved back to ${originalStatus}`);
+      }
+    };
+
+    window.addEventListener('email-update', handleEmailUpdate);
+    return () => window.removeEventListener('email-update', handleEmailUpdate);
+  }, [queryClient, selectedMailbox]);
+
   const handleLogout = () => {
     logout();
   };
-
-
-  // 👉 Init INBOX cho đúng id Gmail
-  const [searchQuery, setSearchQuery] = useState("");
-
-
-  const [selectedMailbox, setSelectedMailbox] = useState('INBOX');
   const [selectedEmail, setSelectedEmail] = useState<string | null>(null);
   const [mobileView, setMobileView] = useState<'emails' | 'email'>('emails');
 
@@ -1344,6 +1367,31 @@ export default function Inbox() {
                   onChange={(e) => setSearchQuery(e.target.value)}
                 />
               </div>
+            </div>
+
+            {/* ===== KANBAN TOGGLE BUTTON ===== */}
+            <div className="px-3 pb-2">
+              <button
+                className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-all"
+                style={{
+                  backgroundColor: 'var(--bg-secondary)',
+                  color: 'var(--accent-primary)',
+                  border: '1px solid var(--border-primary)',
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.backgroundColor = 'var(--bg-tertiary)';
+                  e.currentTarget.style.borderColor = 'var(--accent-primary)';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.backgroundColor = 'var(--bg-secondary)';
+                  e.currentTarget.style.borderColor = 'var(--border-primary)';
+                }}
+                onClick={() => navigate('/kanban')}
+                aria-label="Switch to Kanban view"
+              >
+                <span className="material-symbols-outlined text-base">view_kanban</span>
+                <span>Kanban View</span>
+              </button>
             </div>
 
             {/* ===== ACTION BAR ===== */}

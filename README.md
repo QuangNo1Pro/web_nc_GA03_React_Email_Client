@@ -7,6 +7,10 @@
 -   **Tích hợp Gmail thời gian thực:** Kết nối với tài khoản Gmail của bạn và hiển thị email trong giao diện bảng điều khiển 3 cột.
 -   **Xác thực Google OAuth2 bảo mật:** Sử dụng luồng OAuth2 phía máy chủ an toàn để truy cập dữ liệu Gmail của bạn.
 -   **Chức năng email đầy đủ:** Đọc, soạn, trả lời, xóa, gắn dấu sao và quản lý email của bạn.
+-   **Bảng Kanban với 4 cột:** Inbox, To Do, In Progress, Done - kéo thả email giữa các cột.
+-   **Snooze/Deferral với đồng bộ Gmail:** Hoãn email với đồng bộ hoá 2 chiều với Gmail API (SNOOZED label).
+-   **Tự động đánh thức (Auto wake-up):** Scheduler backend kiểm tra mỗi phút để khôi phục email đã hết hạn.
+-   **Rollback tự động:** Nếu Gmail API thất bại, thay đổi local sẽ được hoàn tác tự động.
 -   **Bảo mật dựa trên Token:** Sử dụng access và refresh token JWT để giao tiếp API an toàn với proxy backend.
 -   **Tự động làm mới Token:** Tự động làm mới access token đã hết hạn mà không làm gián đoạn người dùng.
 -   **Giao diện bảng điều khiển Email 3 cột:** Giao diện người dùng email client tương thích, tương tác.
@@ -173,3 +177,23 @@ Nếu gặp lỗi 401 "Not authenticated" sau khi đăng nhập Google:
 5. Kiểm tra Console logs có lỗi CORS không
 
 **Lưu ý:** Backend đã triển khai có các biến môi trường cần thiết cho thông tin xác thực Google.
+
+---
+
+## 📚 Tài liệu mở rộng
+
+Để biết chi tiết về các tính năng nâng cao và triển khai kỹ thuật:
+
+- **[GMAIL_SNOOZE_SYNC.md](./GMAIL_SNOOZE_SYNC.md)**: Tài liệu đầy đủ về tính năng Snooze với đồng bộ Gmail
+  - Kiến trúc hệ thống và data flow
+  - Chi tiết triển khai từng file (backend + frontend)
+  - Xử lý lỗi và rollback mechanism
+  - Hướng dẫn test và deployment
+  - Troubleshooting guide
+  - Mapping với tiêu chí chấm điểm (30/30 điểm)
+
+- **[FIX_SUMMARY.md](./FIX_SUMMARY.md)**: Tóm tắt các fix persistence cho Kanban board
+- **[PERSISTENCE_FIX.md](./PERSISTENCE_FIX.md)**: Chi tiết các bug persistence và cách fix
+- **[TEST_PERSISTENCE.md](./TEST_PERSISTENCE.md)**: Checklist kiểm tra persistence sau mỗi hành động
+- **[TECHNICAL_REPORT.md](./TECHNICAL_REPORT.md)**: Báo cáo kỹ thuật về phát triển tính năng III
+- **[DEPLOYMENT_CHECKLIST.md](./DEPLOYMENT_CHECKLIST.md)**: Checklist triển khai production

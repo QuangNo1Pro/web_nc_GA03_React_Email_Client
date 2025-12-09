@@ -247,6 +247,13 @@ export class UsersService {
             payload: email.payload,
             internalDate: email.internalDate,
           },
+          // Use $setOnInsert to preserve status/snooze fields if they already exist
+          $setOnInsert: {
+            status: 'Inbox',
+            snoozed: false,
+            snoozedUntil: null,
+            snoozedFromStatus: null,
+          },
         },
         upsert: true,
       },
@@ -266,6 +273,7 @@ export class UsersService {
             { labelIds: { $nin: ['TRASH'] } },
           ],
         })
+        .select('userId messageId snippet labelIds payload internalDate status snoozed snoozedUntil snoozedFromStatus createdAt updatedAt')
         .sort({ internalDate: -1 })
         .skip(skip)
         .limit(limit)
@@ -274,6 +282,7 @@ export class UsersService {
 
     return this.emailModel
       .find({ userId, labelIds: { $in: [labelId] } })
+      .select('userId messageId snippet labelIds payload internalDate status snoozed snoozedUntil snoozedFromStatus createdAt updatedAt')
       .sort({ internalDate: -1 })
       .skip(skip)
       .limit(limit)
@@ -324,4 +333,126 @@ export class UsersService {
   async setLastHistoryId(userId: string, historyId: string) {
     return this.userModel.findByIdAndUpdate(userId, { lastHistoryId: historyId }).exec();
   }
+
+  // ========== FEATURE II: KANBAN STATUS UPDATE ==========
+  async updateEmailStatus(userId: string, messageId: string, status: string) {
+    return this.emailModel
+      .findOneAndUpdate(
+        { userId, messageId },
+        { $set: { status } },
+        { new: true },
+      )
+      .exec();
+  }
+
+  // ========== FEATURE III: SNOOZE OPERATIONS ==========
+  
+  /**
+   * Find email by messageId for snooze operations
+   */
+  async findEmailByMessageId(userId: string, messageId: string): Promise<EmailDocument | null> {
+    return this.emailModel.findOne({ userId, messageId }).exec();
+  }
+
+  /**
+   * Update email snooze metadata
+   */
+  async updateEmailSnooze(
+    userId: string,
+    messageId: string,
+    snoozed: boolean,
+    snoozedUntil: Date | null,
+    snoozedFromStatus: string | null,
+  ) {
+    const updateData: any = {
+      snoozed,
+      snoozedUntil,
+      snoozedFromStatus,
+    };
+
+    // If snoozing, also set status to 'Snoozed'
+    if (snoozed) {
+      updateData.status = 'Snoozed';
+    }
+
+    return this.emailModel
+      .findOneAndUpdate(
+        { userId, messageId },
+        { $set: updateData },
+        { new: true },
+      )
+      .exec();
+  }
+
+  /**
+   * Find all snoozed emails for a user
+   */
+  async findSnoozedEmails(userId: string): Promise<EmailDocument[]> {
+    return this.emailModel
+      .find({ userId, snoozed: true })
+      .sort({ snoozedUntil: 1 }) // Sort by wake time (earliest first)
+      .exec();
+  }
+
+  /**
+   * Find all expired snoozed emails (for scheduler)
+   * Returns emails where snoozed=true AND snoozedUntil <= now
+   */
+  async findExpiredSnoozedEmails(): Promise<EmailDocument[]> {
+    const now = new Date();
+    return this.emailModel
+      .find({
+        snoozed: true,
+        snoozedUntil: { $lte: now },
+      })
+      .exec();
+  }
+
+  /**
+   * Get snoozed emails with full details for user
+   */
+  async getSnoozedEmailsWithDetails(userId: string) {
+    return this.emailModel
+      .find({ userId, snoozed: true })
+      .select('messageId snippet labelIds payload internalDate snoozed snoozedUntil snoozedFromStatus status')
+      .sort({ snoozedUntil: 1 })
+      .exec();
+  }
+
+  /**
+   * Update snooze time for an email
+   */
+  async updateSnoozeTime(userId: string, messageId: string, newSnoozedUntil: Date) {
+    const email = await this.emailModel.findOne({ userId, messageId }).exec();
+    
+    if (!email) {
+      throw new Error('Email not found');
+    }
+
+    if (!email.snoozed) {
+      throw new Error('Email is not snoozed');
+    }
+
+    return this.emailModel
+      .findOneAndUpdate(
+        { userId, messageId },
+        { $set: { snoozedUntil: newSnoozedUntil } },
+        { new: true }
+      )
+      .exec();
+  }
+
+  /**
+   * Generic email update helper
+   */
+  async updateEmail(userId: string, messageId: string, updates: any) {
+    return this.emailModel
+      .findOneAndUpdate(
+        { userId, messageId },
+        { $set: updates },
+        { new: true }
+      )
+      .exec();
+  }
 }
+

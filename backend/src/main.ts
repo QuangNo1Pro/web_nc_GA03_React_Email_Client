@@ -38,6 +38,19 @@ async function bootstrap() {
 
   app.use(cookieParser());
 
+  // Add global logging middleware to debug request issues
+  app.use((req: any, res: any, next: any) => {
+    if (req.url.includes('/gmail/emails/snoozed')) {
+      console.log('[MAIN] 🔍 Request to /gmail/emails/snoozed:');
+      console.log('  - Method:', req.method);
+      console.log('  - URL:', req.url);
+      console.log('  - Headers:', req.headers);
+      console.log('  - Query:', req.query);
+      console.log('  - Body:', req.body);
+    }
+    next();
+  });
+
   app.useGlobalPipes(
     new ValidationPipe({
       whitelist: true,

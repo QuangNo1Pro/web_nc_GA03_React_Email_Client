@@ -22,7 +22,7 @@ import { GmailModule } from '../gmail/gmail.module';
       imports: [ConfigModule],
       useFactory: async (configService: ConfigService) => ({
         secret: configService.get<string>('JWT_SECRET'),
-        signOptions: { expiresIn: '30s' }, // 🧪 TEST: 30 seconds (change back to '15m' for production)
+        signOptions: { expiresIn: '15m' }, // Access token expires in 15 minutes
       }),
       inject: [ConfigService],
     }),
