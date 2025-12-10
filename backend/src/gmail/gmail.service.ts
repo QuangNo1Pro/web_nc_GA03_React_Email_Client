@@ -161,22 +161,38 @@ export class GmailService {
     }
   }
 
+  /**
+   * Update unread counts for mailboxes based on label IDs
+   */
+  private async updateUnreadCountsForLabels(userId: string, labelIds: string[]) {
+    try {
+      for (const labelId of labelIds) {
+        const unreadCount = await this.usersService.countUnreadByLabel(userId, labelId);
+        await this.usersService.updateMailboxUnread(userId, labelId, unreadCount);
+      }
+    } catch (error: any) {
+      this.logger.error(`Failed to update unread counts: ${error?.message || error}`);
+    }
+  }
+
   async getMailboxes(userId: string) {
     try {
       // Get mailboxes from database
       const mailboxes = await this.usersService.getMailboxes(userId);
 
       if (mailboxes && mailboxes.length > 0) {
-        // Đếm unread từ DB cho TẤT CẢ mailboxes
-        const mailboxesWithRealUnread = mailboxes.map((m) => {
-          // Use mailbox unread count from Gmail API directly
-          return {
-            id: m.id, // Real Gmail label ID (e.g., "INBOX", "Label_123", "SENT")
-            name: m.name, // Human-readable name
-            messagesTotal: m.messagesTotal,
-            messagesUnread: m.messagesUnread || 0, // Use API count
-          };
-        });
+        // Tính lại unread count từ DB emails cho TẤT CẢ mailboxes
+        const mailboxesWithRealUnread = await Promise.all(
+          mailboxes.map(async (m) => {
+            const unreadCount = await this.usersService.countUnreadByLabel(userId, m.id);
+            return {
+              id: m.id, // Real Gmail label ID (e.g., "INBOX", "Label_123", "SENT")
+              name: m.name, // Human-readable name
+              messagesTotal: m.messagesTotal,
+              messagesUnread: unreadCount, // Tính lại từ DB emails
+            };
+          })
+        );
         return mailboxesWithRealUnread;
       }
 
@@ -541,6 +557,10 @@ export class GmailService {
     const updatedMsg = await gmail.users.messages.get({ userId: 'me', id: messageId });
     const updatedLabelIds = updatedMsg.data.labelIds || [];
     await this.usersService.updateEmailLabels(userId, messageId, updatedLabelIds);
+    
+    // Update unread count for all affected mailboxes
+    await this.updateUnreadCountsForLabels(userId, updatedLabelIds);
+    
     return res.data;
   }
 

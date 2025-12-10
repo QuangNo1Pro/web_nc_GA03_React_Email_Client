@@ -67,7 +67,7 @@ const KanbanBoard: React.FC = () => {
         body: emailDetail?.body || '',
         attachments: emailDetail?.attachments || [],
         // Backend returns lowercase header keys (headers.from, not headers.From)
-        from: emailDetail?.headers?.from || listEmail?.sender || listEmail?.from,
+        from: emailDetail?.headers?.from || listEmail?.sender || (listEmail as any)?.from,
         to: emailDetail?.headers?.to || listEmail?.to,
         cc: emailDetail?.headers?.cc || listEmail?.cc,
         bcc: emailDetail?.headers?.bcc || listEmail?.bcc,
@@ -99,22 +99,22 @@ const KanbanBoard: React.FC = () => {
 
   // Email action handlers (placeholder - redirect to inbox for full functionality)
   const handleReply = () => {
-    toast.info('Redirecting to inbox for compose...', { duration: 2000 });
+    toast('Redirecting to inbox for compose...', { duration: 2000, icon: 'ℹ️' });
     navigate('/inbox');
   };
 
   const handleReplyAll = () => {
-    toast.info('Redirecting to inbox for compose...', { duration: 2000 });
+    toast('Redirecting to inbox for compose...', { duration: 2000, icon: 'ℹ️' });
     navigate('/inbox');
   };
 
   const handleForward = () => {
-    toast.info('Redirecting to inbox for compose...', { duration: 2000 });
+    toast('Redirecting to inbox for compose...', { duration: 2000, icon: 'ℹ️' });
     navigate('/inbox');
   };
 
   const handleToggleRead = (id: string) => {
-    toast.info('Mark read/unread - coming soon', { duration: 2000 });
+    toast('Mark read/unread - coming soon', { duration: 2000, icon: 'ℹ️' });
   };
 
   const handleToggleStar = (id: string) => {
@@ -123,12 +123,12 @@ const KanbanBoard: React.FC = () => {
   };
 
   const handleDeleteEmail = (id: string) => {
-    toast.info('Delete - coming soon', { duration: 2000 });
+    toast('Delete - coming soon', { duration: 2000, icon: 'ℹ️' });
     handleCloseModal();
   };
 
   const handleDownloadAttachment = (messageId: string, attachment: any) => {
-    toast.info('Download attachment - coming soon', { duration: 2000 });
+    toast('Download attachment - coming soon', { duration: 2000, icon: 'ℹ️' });
   };
 
   // FEATURE III: Handle snooze action
@@ -189,7 +189,7 @@ const KanbanBoard: React.FC = () => {
       <div className="flex items-center justify-center h-full bg-gray-50">
         <div className="flex flex-col items-center gap-4">
           <div className="w-12 h-12 border-4 border-blue-500 border-t-transparent rounded-full animate-spin" />
-          <p className="text-gray-600 font-medium">Loading emails...</p>
+          <p className="text-gray-600">Loading emails...</p>
         </div>
       </div>
     );

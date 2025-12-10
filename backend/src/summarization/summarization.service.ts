@@ -5,255 +5,99 @@ import { GoogleGenerativeAI } from '@google/generative-ai';
 export class SummarizationService {
   private readonly logger = new Logger(SummarizationService.name);
   private genAI: GoogleGenerativeAI | null = null;
-  private readonly MAX_SUMMARY_WORDS = 25;
-  private readonly API_TIMEOUT = 10000; // 10 seconds
 
   constructor() {
     const apiKey = process.env.GEMINI_API_KEY;
     
     if (!apiKey) {
-      this.logger.warn('⚠️  GEMINI_API_KEY not found - summarization will use fallback mode');
+      this.logger.warn('⚠️  GEMINI_API_KEY not found');
     } else {
       this.genAI = new GoogleGenerativeAI(apiKey);
       this.logger.log('✅ Summarization service initialized with Gemini AI');
     }
   }
 
-  /**
-   * Main entry point for email summarization
-   * @param emailBody - Cleaned email body text
-   * @returns Short, meaningful summary (1-2 sentences, max 25 words)
-   */
   async summarizeEmail(emailBody: string): Promise<string> {
-    // Validate input - require minimum 50 chars for meaningful summary
+    this.logger.log('\n========== [SummarizationService] BẮT ĐẦU TÓM TẮT ==========');
+    this.logger.log(`📝 Input length: ${emailBody.length} chars`);
+    
     if (!emailBody || emailBody.trim().length < 50) {
       return 'Email không có đủ nội dung để tóm tắt.';
     }
 
-    // Check if it's a marketing/notification template
-    if (this.isMarketingOrTemplate(emailBody)) {
-      return 'Email thông báo tự động từ hệ thống. Không có nội dung quan trọng.';
-    }
-
-    // Generate summary with Gemini AI
-    try {
-      const summary = await this.generateWithAI(emailBody);
-      
-      // Validate summary quality
-      if (this.isValidSummary(summary, emailBody)) {
-        return summary;
-      }
-      
-      // Fallback if AI generates poor quality
-      this.logger.warn('[Summarization] AI generated poor quality summary, using fallback');
-      return this.generateFallbackSummary(emailBody);
-      
-    } catch (error: any) {
-      this.logger.error('[Summarization] AI generation failed:', error?.message || String(error));
-      return this.generateFallbackSummary(emailBody);
-    }
-  }
-
-  /**
-   * Generate summary using Gemini AI with strict constraints
-   */
-  private async generateWithAI(emailBody: string): Promise<string> {
     if (!this.genAI) {
-      throw new Error('Gemini AI not initialized');
+      return 'Gemini AI chưa được cấu hình.';
     }
 
-    // Truncate to avoid token limits (keep first 2000 chars for context)
-    const truncated = emailBody.length > 2000 
-      ? emailBody.substring(0, 2000) + '...' 
-      : emailBody;
+    try {
+      const truncated = emailBody.length > 15000 
+        ? emailBody.substring(0, 15000) 
+        : emailBody;
 
-    const model = this.genAI.getGenerativeModel({ 
-      model: 'gemini-pro',
-      generationConfig: {
-        temperature: 0.3, // Lower temperature for more focused summaries
-        maxOutputTokens: 100, // Strict limit
-      }
-    });
+      this.logger.log(`✂️  Truncated to: ${truncated.length} chars`);
+      this.logger.log('\n--- NỘI DUNG GỬI CHO GEMINI (first 500 chars) ---');
+      this.logger.log(truncated.substring(0, 500) + '...\n');
 
-    const prompt = `Bạn là trợ lý tóm tắt email chuyên nghiệp.
+      const model = this.genAI.getGenerativeModel({ 
+        model: 'gemini-3-pro-preview',
+        generationConfig: {
+          temperature: 0.3,
+          maxOutputTokens: 200,
+        }
+      });
 
-YÊU CẦU BẮT BUỘC:
-- Tóm tắt nội dung email thành 1-2 câu NGẮN GỌN, tối đa 25 từ
-- Chỉ nêu ý chính, hành động cần làm, hoặc thông tin quan trọng
-- KHÔNG lặp lại nguyên văn nội dung email
-- KHÔNG thêm ý không có trong email gốc
-- KHÔNG tóm tắt thành câu vô nghĩa
-- Viết bằng tiếng Việt rõ ràng, súc tích
+      const prompt = `Bạn là trợ lý email thông minh. Hãy tóm tắt email này bằng tiếng Việt một cách THIẾT THỰC và DỄ HIỂU nhất.
 
-Email cần tóm tắt:
+NGUYÊN TẮC TÓM TẮT:
+1. Viết bằng 100% TIẾNG VIỆT (chỉ giữ nguyên tên riêng như tên công ty, sản phẩm, người)
+2. Tóm tắt thành 2-4 câu NGẮN GỌN, SÚC TÍCH, DỄ ĐỌC
+3. Tập trung vào: MỤC ĐÍCH email, THÔNG TIN QUAN TRỌNG, HÀNH ĐỘNG cần làm
+4. BỎ QUA hoàn toàn: chữ ký, footer, thông tin liên hệ, disclaimer, unsubscribe
+5. Dùng ngôn ngữ TỰ NHIÊN, THÂN THIỆN như nói chuyện hàng ngày
+6. Nếu có số liệu, thời gian, địa điểm quan trọng thì GHI RÕ
+
+VÍ DỤ TÓM TẮT TỐT:
+- "Công ty thông báo nâng cấp hệ thống vào 15/12, dịch vụ sẽ tạm ngưng 2 tiếng. Khách hàng cần hoàn tất giao dịch trước 14h."
+- "Email xác nhận đơn hàng #12345 trị giá 2.5 triệu đồng. Dự kiến giao hàng trong 3-5 ngày làm việc."
+- "Nhắc nhở thanh toán hóa đơn tháng 11 số tiền 500k, hạn chót 20/12. Có thể thanh toán qua chuyển khoản hoặc ví điện tử."
+
+---
+
+EMAIL CẦN TÓM TẮT:
 ${truncated}
 
-Tóm tắt (chỉ trả về summary, không có phần giải thích):`;
+---
 
-    const result = await Promise.race([
-      model.generateContent(prompt),
-      this.timeout(this.API_TIMEOUT)
-    ]);
+Hãy viết tóm tắt bằng tiếng Việt (2-4 câu ngắn gọn):`;
 
-    if (result === 'timeout') {
-      throw new Error('AI generation timeout');
+      this.logger.log('🤖 Calling Gemini 3 Pro Preview...');
+      const result = await model.generateContent(prompt);
+      const response = await result.response;
+      const summary = response.text().trim();
+
+      this.logger.log('\n--- KẾT QUẢ TỪ GEMINI ---');
+      this.logger.log(`✅ Summary (${summary.length} chars):`);
+      this.logger.log(summary);
+      this.logger.log('========== [SummarizationService] KẾT THÚC ==========\n');
+      return summary;
+
+    } catch (error: any) {
+      this.logger.error(`❌ Gemini AI failed: ${error?.message}`);
+      this.logger.log('========== [SummarizationService] KẾT THÚC (LỖI) ==========\n');
+      return 'Không thể tóm tắt email lúc này.';
     }
-
-    const response = await (result as any).response;
-    const summary = response.text().trim();
-
-    // Remove quotes if AI wraps response in them
-    return summary.replace(/^["']|["']$/g, '');
   }
 
-  /**
-   * Validate summary quality
-   */
-  private isValidSummary(summary: string, originalBody: string): boolean {
-    if (!summary || summary.length < 10) return false;
-    
-    // Check word count (should be under 25 words)
-    const wordCount = summary.split(/\s+/).length;
-    if (wordCount > this.MAX_SUMMARY_WORDS + 5) return false; // Allow 5 word buffer
-    
-    // Check if summary is just repeating original text (more than 70% overlap)
-    const overlapRatio = this.calculateTextOverlap(summary, originalBody);
-    if (overlapRatio > 0.7) return false;
-    
-    // Check for meaningless patterns
-    const meaninglessPatterns = [
-      /^(no content|không có nội dung|empty|trống)/i,
-      /^(email|message|thư)/i, // Just repeating "email" or "message"
-      /^[.\s]+$/, // Only dots and spaces
-    ];
-    
-    if (meaninglessPatterns.some(pattern => pattern.test(summary))) {
-      return false;
-    }
-    
-    return true;
-  }
-
-  /**
-   * Calculate text overlap ratio (simple approach)
-   */
-  private calculateTextOverlap(summary: string, original: string): number {
-    const summaryWords = new Set(summary.toLowerCase().split(/\s+/));
-    const originalWords = original.toLowerCase().split(/\s+/);
-    
-    let matches = 0;
-    summaryWords.forEach(word => {
-      if (originalWords.includes(word) && word.length > 3) { // Ignore short words
-        matches++;
-      }
-    });
-    
-    return matches / Math.max(summaryWords.size, 1);
-  }
-
-  /**
-   * Detect marketing/template emails
-   */
-  private isMarketingOrTemplate(emailBody: string): boolean {
-    const lowerBody = emailBody.toLowerCase();
-    
-    // Marketing indicators
-    const marketingKeywords = [
-      'unsubscribe', 'click here', 'shop now', 'buy now',
-      'special offer', 'limited time', 'discount', 'sale',
-      'promotional', 'newsletter', 'update your preferences',
-      'pinterest', 'shopee', 'lazada', 'tiki', 'sendo',
-      'if you no longer wish to receive', 'this is an automated message'
-    ];
-    
-    const hasMarketingKeywords = marketingKeywords.some(keyword => 
-      lowerBody.includes(keyword)
-    );
-    
-    // Check if body is mostly HTML/links (template characteristic)
-    const linkCount = (emailBody.match(/https?:\/\//gi) || []).length;
-    const hasExcessiveLinks = linkCount > 5;
-    
-    return hasMarketingKeywords || hasExcessiveLinks;
-  }
-
-  /**
-   * Fallback summary when AI fails or generates poor quality
-   */
-  private generateFallbackSummary(emailBody: string): string {
-    // Clean text
-    const cleaned = emailBody
-      .replace(/\s+/g, ' ')
-      .trim();
-
-    // Extract first meaningful sentence
-    const sentences = cleaned.match(/[^.!?]+[.!?]+/g) || [];
-    
-    if (sentences.length === 0) {
-      // No sentences found, take first 100 chars
-      const preview = cleaned.substring(0, 100).trim();
-      return preview + (cleaned.length > 100 ? '...' : '');
-    }
-
-    // Get first 1-2 sentences, limit to ~25 words
-    let summary = sentences[0] ? sentences[0].trim() : cleaned.substring(0, 100);
-    const words = summary.split(/\s+/);
-    
-    if (words.length > this.MAX_SUMMARY_WORDS) {
-      summary = words.slice(0, this.MAX_SUMMARY_WORDS).join(' ') + '...';
-    } else if (sentences.length > 1 && words.length < 15) {
-      // If first sentence is too short, add second
-      const secondSentence = sentences[1].trim();
-      const combined = summary + ' ' + secondSentence;
-      const combinedWords = combined.split(/\s+/);
-      
-      if (combinedWords.length <= this.MAX_SUMMARY_WORDS) {
-        summary = combined;
-      }
-    }
-
-    return summary;
-  }
-
-  /**
-   * Timeout helper
-   */
-  private timeout(ms: number): Promise<string> {
-    return new Promise(resolve => {
-      setTimeout(() => resolve('timeout'), ms);
-    });
-  }
-
-  /**
-   * Clean HTML and extract plain text
-   */
   cleanHtmlToText(html: string): string {
     if (!html) return '';
     
     let text = html;
     
-    // Remove style blocks
     text = text.replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '');
-    
-    // Remove script blocks
     text = text.replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '');
-    
-    // Remove email signatures (common patterns)
-    text = text.replace(/--\s*$/gm, ''); // -- signature delimiter
-    text = text.replace(/Best regards,[\s\S]*$/i, '');
-    text = text.replace(/Sent from my (iPhone|iPad|Android)/gi, '');
-    
-    // Remove disclaimers
-    text = text.replace(/This email and any attachments[\s\S]*$/i, '');
-    text = text.replace(/CONFIDENTIAL[\s\S]*$/i, '');
-    
-    // Convert <br> to newlines
     text = text.replace(/<br\s*\/?>/gi, '\n');
-    
-    // Remove all HTML tags
     text = text.replace(/<[^>]+>/g, ' ');
     
-    // Decode HTML entities
     text = text
       .replace(/&nbsp;/g, ' ')
       .replace(/&amp;/g, '&')
@@ -262,7 +106,6 @@ Tóm tắt (chỉ trả về summary, không có phần giải thích):`;
       .replace(/&quot;/g, '"')
       .replace(/&#39;/g, "'");
     
-    // Normalize whitespace
     text = text.replace(/\s+/g, ' ').trim();
     
     return text;

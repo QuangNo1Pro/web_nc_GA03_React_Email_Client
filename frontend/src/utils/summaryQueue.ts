@@ -13,7 +13,7 @@ type SummaryTask = {
 class SummaryQueueManager {
   private queue: SummaryTask[] = [];
   private isProcessing = false;
-  private delayBetweenRequests = 2500; // 2.5 seconds delay to avoid rate limit
+  private delayBetweenRequests = 1000; // 1 second delay to avoid rate limit
   private maxRetries = 2;
 
   /**

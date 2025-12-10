@@ -84,7 +84,7 @@ const MailboxList: React.FC<MailboxListProps> = ({
                         {getMailboxLabel(mailbox)}
                       </span>
                     </div>
-                    {mailbox.id !== 'UNREAD' && mailbox.messagesUnread > 0 && (
+                    {mailbox.messagesUnread > 0 && (
                       <span
                         className="mailbox-count text-xs font-semibold flex-shrink-0"
                         style={{
