@@ -24,7 +24,7 @@ export class GeminiService implements OnModuleInit {
     if (this.hasApiKey) {
       try {
         const response = await fetch(
-          `https://generativelanguage.googleapis.com/v1/models/gemini-pro:generateContent?key=${this.apiKey}`,
+          `https://generativelanguage.googleapis.com/v1beta/models/gemini-3-pro-preview:generateContent?key=${this.apiKey}`,
           {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -38,7 +38,7 @@ export class GeminiService implements OnModuleInit {
           throw new Error(`${response.status} ${response.statusText}`);
         }
 
-        this.logger.log('✅ Gemini API connection successful (v1 endpoint)!');
+        this.logger.log('✅ Gemini API connection successful (gemini-3-pro-preview)!');
       } catch (e: any) {
         this.logger.error(`❌ Gemini API test failed: ${e.message}`);
         this.logger.warn('⚠️ Falling back to local summarization');
@@ -48,24 +48,40 @@ export class GeminiService implements OnModuleInit {
   }
 
   isAvailable(): boolean {
-    return true; 
+    return this.hasApiKey; 
   }
 
   async summarizeEmail(
     emailContent: string,
     subject: string,
-    maxLength: number = 160,
+    maxLength: number = 300,
   ): Promise<string | null> {
     const cleanContent = this.stripHtml(emailContent);
-    const truncatedInput = cleanContent.slice(0, 10000);
+    const relevantContent = this.extractRelevantContent(cleanContent);
+    const truncatedInput = relevantContent.slice(0, 15000);
 
     // 1. Try Gemini AI via REST API
     if (this.hasApiKey) {
       try {
-        const prompt = `Summarize this email in 1-2 sentences (max ${maxLength} chars):\n\nSubject: ${subject}\n\n${truncatedInput}`;
+        const prompt = `Bạn là trợ lý email thông minh. Nhiệm vụ của bạn là tóm tắt email bằng tiếng Việt.
+
+YÊU CẦU:
+1. Tóm tắt NỘI DUNG CHÍNH của email bằng 2-3 câu ngắn gọn, dễ hiểu
+2. BỎ QUA: footer, chữ ký, thông tin liên hệ, unsubscribe links, legal notices
+3. KHÔNG dịch tên công ty, tên sản phẩm, tên riêng (giữ nguyên tiếng Anh)
+4. Tập trung vào: mục đích email, thông tin quan trọng, hành động cần làm (nếu có)
+5. Viết ngắn gọn, súc tích, dễ đọc
+
+EMAIL:
+Tiêu đề: ${subject}
+
+Nội dung:
+${truncatedInput}
+
+TÓM TẮT (bằng tiếng Việt):`;
 
         const response = await fetch(
-          `https://generativelanguage.googleapis.com/v1/models/gemini-pro:generateContent?key=${this.apiKey}`,
+          `https://generativelanguage.googleapis.com/v1beta/models/gemini-3-pro-preview:generateContent?key=${this.apiKey}`,
           {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -81,8 +97,11 @@ export class GeminiService implements OnModuleInit {
           
           if (summary) {
             this.logger.log(`✅ Gemini AI Summary (${summary.length} chars)`);
-            return this.enforceLength(summary, maxLength);
+            return summary; // Don't enforce length, let it be natural
           }
+        } else {
+          const errorText = await response.text();
+          this.logger.warn(`⚠️ Gemini API error: ${response.status} - ${errorText}`);
         }
       } catch (error: any) {
         this.logger.warn(`⚠️ Gemini API failed: ${error.message}`);
@@ -96,39 +115,74 @@ export class GeminiService implements OnModuleInit {
   }
 
   private localSummarize(content: string, subject: string, maxLength: number): string {
-    const sentences = content
+    // Clean up common footer patterns first
+    const cleanedContent = content
+      .split(/\n{2,}/)
+      .filter(paragraph => {
+        const lower = paragraph.toLowerCase();
+        return !lower.includes('unsubscribe') && 
+               !lower.includes('confidential') &&
+               !lower.includes('privacy policy') &&
+               !lower.includes('terms of service') &&
+               !lower.includes('intended for') &&
+               !lower.includes('legal notice') &&
+               paragraph.length > 30; // Skip very short paragraphs
+      })
+      .join('\n\n');
+
+    const sentences = cleanedContent
       .split(/[.!?\n]+/)
       .map(s => s.trim())
-      // Lọc câu quá ngắn hoặc quá dài (tránh footer)
-      .filter(s => s.length > 20 && s.length < 300) 
-      // Lọc sơ bộ các câu footer phổ biến
-      .filter(s => !s.toLowerCase().includes('unsubscribe') && !s.toLowerCase().includes('confidential'));
+      .filter(s => s.length > 30 && s.length < 400); // Filter reasonable sentences
 
     if (sentences.length === 0) {
-      return this.enforceLength(content, maxLength);
+      return `Email về ${subject}`;
     }
 
-    // Cải tiến: Ưu tiên câu có chứa từ khóa trong Subject
-    const subjectKeywords = subject.toLowerCase().split(' ').filter(w => w.length > 3);
+    // Score sentences based on relevance
+    const subjectKeywords = subject.toLowerCase().split(/\s+/).filter(w => w.length > 3);
     
-    const scoredSentences = sentences.map(s => {
+    const scoredSentences = sentences.map((s, index) => {
         let score = 0;
-        // Điểm cộng cho độ dài hợp lý
-        score += s.length; 
-        // Điểm cộng lớn nếu khớp từ khóa với Subject
-        if (subjectKeywords.some(k => s.toLowerCase().includes(k))) {
-            score += 100;
+        
+        // Prefer sentences near the beginning (first 5 sentences)
+        if (index < 5) {
+          score += (5 - index) * 50;
         }
-        return { text: s, score };
+        
+        // Prefer medium-length sentences (50-250 chars)
+        if (s.length >= 50 && s.length <= 250) {
+          score += 100;
+        }
+        
+        // Bonus for subject keyword matches
+        subjectKeywords.forEach(keyword => {
+          if (s.toLowerCase().includes(keyword)) {
+            score += 200;
+          }
+        });
+        
+        // Penalty for very long sentences (likely not summaries)
+        if (s.length > 300) {
+          score -= 50;
+        }
+        
+        return { text: s, score, index };
     });
 
-    // Sort theo điểm cao nhất
-    const bestSentences = scoredSentences
+    // Get top 2-3 sentences, maintain original order
+    const topSentences = scoredSentences
       .sort((a, b) => b.score - a.score)
-      .slice(0, 1); // Chỉ lấy 1 câu tốt nhất cho local fallback để an toàn
+      .slice(0, 3)
+      .sort((a, b) => a.index - b.index)
+      .map(s => s.text);
 
-    const summary = bestSentences.map(s => s.text).join('. ');
-    return this.enforceLength(summary, maxLength);
+    let summary = topSentences.join('. ');
+    if (!summary.endsWith('.')) {
+      summary += '.';
+    }
+    
+    return summary;
   }
 
   // Hàm tiện ích cắt chuỗi đẹp
@@ -137,14 +191,98 @@ export class GeminiService implements OnModuleInit {
       return text.slice(0, maxLength - 3) + '...';
   }
 
+  private extractRelevantContent(text: string): string {
+    if (!text) return '';
+    
+    // Split into lines for processing
+    const lines = text.split('\n').map(line => line.trim()).filter(line => line.length > 0);
+    
+    // Keywords to identify footer/junk content (case insensitive)
+    const footerPatterns = [
+      /unsubscribe/i,
+      /đăng ký nhận/i,
+      /hủy đăng ký/i,
+      /privacy policy/i,
+      /chính sách bảo mật/i,
+      /terms of service/i,
+      /điều khoản/i,
+      /confidential/i,
+      /bảo mật/i,
+      /copyright/i,
+      /all rights reserved/i,
+      /email tự động/i,
+      /vui lòng không trả lời/i,
+      /do not reply/i,
+      /thêm.*vào danh bạ/i,
+      /legal notice/i,
+      /intended for/i,
+      /trân trọng/i,
+      /best regards/i,
+      /sincerely/i,
+      /đội ngũ/i,
+      /liên hệ.*tại đây/i,
+      /contact us/i,
+      /follow us/i,
+      /theo dõi chúng tôi/i,
+      /------/,  // Separator lines
+      /_{5,}/,   // Underscores
+      /={5,}/,   // Equal signs
+    ];
+    
+    const relevantLines: string[] = [];
+    let footerStarted = false;
+    
+    for (const line of lines) {
+      // Stop processing when we hit footer patterns
+      if (footerPatterns.some(pattern => pattern.test(line))) {
+        footerStarted = true;
+      }
+      
+      // Skip very short lines (likely decorative or junk)
+      if (line.length < 10) {
+        continue;
+      }
+      
+      // Keep line if footer hasn't started
+      if (!footerStarted) {
+        relevantLines.push(line);
+      }
+    }
+    
+    return relevantLines.join('\n');
+  }
+
   private stripHtml(html: string): string {
     if (!html) return '';
-    return html
-      .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
-      .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
-      .replace(/<[^>]+>/g, ' ') // Strip tags
-      .replace(/&nbsp;/g, ' ') // Handle common entity
-      .replace(/\s+/g, ' ')
-      .trim();
+    
+    let text = html;
+    
+    // Remove style, script, and other non-content tags
+    text = text.replace(/<style[^>]*>[\s\S]*?<\/style>/gi, ' ');
+    text = text.replace(/<script[^>]*>[\s\S]*?<\/script>/gi, ' ');
+    text = text.replace(/<head[^>]*>[\s\S]*?<\/head>/gi, ' ');
+    
+    // Add line breaks for block elements to preserve structure
+    text = text.replace(/<\/?(div|p|br|tr|h[1-6]|li)[^>]*>/gi, '\n');
+    text = text.replace(/<\/td[^>]*>/gi, ' | ');
+    
+    // Remove all remaining HTML tags
+    text = text.replace(/<[^>]+>/g, ' ');
+    
+    // Decode HTML entities
+    text = text.replace(/&nbsp;/gi, ' ');
+    text = text.replace(/&amp;/gi, '&');
+    text = text.replace(/&lt;/gi, '<');
+    text = text.replace(/&gt;/gi, '>');
+    text = text.replace(/&quot;/gi, '"');
+    text = text.replace(/&#(\d+);/g, (match, dec) => String.fromCharCode(dec));
+    text = text.replace(/&[a-z]+;/gi, ' ');
+    
+    // Clean up whitespace
+    text = text.replace(/\n\s*\n\s*\n/g, '\n\n'); // Max 2 consecutive newlines
+    text = text.replace(/[ \t]+/g, ' '); // Multiple spaces to single space
+    text = text.replace(/\n /g, '\n'); // Remove spaces at start of lines
+    
+    return text.trim();
   }
 }

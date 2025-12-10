@@ -125,8 +125,6 @@ export const getAttachment = async (messageId: string, attachmentId: string) => 
   return api.get(`/gmail/attachments/${messageId}/${attachmentId}`);
 };
 
-// ========== FEATURE IV: AI SUMMARIZATION ==========
-
 /**
  * Generate AI summary for an email
  * @param emailId - Email message ID

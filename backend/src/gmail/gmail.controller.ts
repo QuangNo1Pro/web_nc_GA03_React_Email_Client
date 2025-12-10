@@ -164,11 +164,12 @@ export class GmailController {
     const user = await this.usersService.findById((req.user as any).userId);
     const provider = user ? (user as any).provider : null;
     
+    // IMAP check commented out
     // If IMAP user, return empty to prevent errors
-    if (provider === 'imap') {
-      console.log('[Gmail Controller] IMAP user accessing Gmail endpoint, returning empty');
-      return [];
-    }
+    // if (provider === 'imap') {
+    //   console.log('[Gmail Controller] IMAP user accessing Gmail endpoint, returning empty');
+    //   return [];
+    // }
     
     return this.gmailService.getMailboxes((req.user as any).userId);
   }
@@ -183,11 +184,12 @@ export class GmailController {
     const user = await this.usersService.findById((req.user as any).userId);
     const provider = user ? (user as any).provider : null;
     
+    // IMAP check commented out
     // If IMAP user, return empty to prevent errors
-    if (provider === 'imap') {
-      console.log('[Gmail Controller] IMAP user accessing Gmail endpoint, returning empty');
-      return { messages: [], nextPageToken: undefined };
-    }
+    // if (provider === 'imap') {
+    //   console.log('[Gmail Controller] IMAP user accessing Gmail endpoint, returning empty');
+    //   return { messages: [], nextPageToken: undefined };
+    // }
     
     return this.gmailService.getEmails(
       (req.user as any).userId,
@@ -346,6 +348,19 @@ export class GmailController {
     body.label
   );
 }
+
+  // FEATURE IV: AI Content Summarization
+  @Post('emails/:id/summary')
+  @UseGuards(AuthGuard('jwt'))
+  async generateEmailSummary(
+    @Request() req: ExpressRequest,
+    @Param('id') id: string,
+  ) {
+    return this.gmailService.generateEmailSummary(
+      (req.user as any).userId,
+      id,
+    );
+  }
 
   @Post('draft')
   @UseGuards(AuthGuard('jwt'))

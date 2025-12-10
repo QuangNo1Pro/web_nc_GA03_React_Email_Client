@@ -14,6 +14,7 @@ export interface EmailDocument extends Document {
   snoozedFromStatus?: string; // Original status before snooze (for restoration)
   // FEATURE IV: AI Summarization
   summary?: string; // AI-generated summary of email content
+  summaryGenerated?: boolean; // Track if summary was already generated (avoid re-generation)
   summarizedAt?: Date; // Timestamp when summary was generated
   
   // Virtual field for clarity when calling Gmail API

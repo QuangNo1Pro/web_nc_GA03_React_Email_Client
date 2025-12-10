@@ -13,9 +13,10 @@ import EmailCard from './EmailCard';
 interface KanbanColumnProps {
   column: KanbanColumnType;
   onSnooze?: (emailId: string, snoozedUntil: string, simulate: boolean) => void;
+  onOpenEmail?: (emailId: string) => void;
 }
 
-const KanbanColumn: React.FC<KanbanColumnProps> = ({ column, onSnooze }) => {
+const KanbanColumn: React.FC<KanbanColumnProps> = ({ column, onSnooze, onOpenEmail }) => {
   // FEATURE II: Make column droppable
   const { setNodeRef, isOver } = useDroppable({
     id: column.id,
@@ -66,6 +67,7 @@ const KanbanColumn: React.FC<KanbanColumnProps> = ({ column, onSnooze }) => {
                 email={email} 
                 borderColor={column.color}
                 onSnooze={onSnooze}
+                onOpenEmail={onOpenEmail}
               />
             </div>
           ))

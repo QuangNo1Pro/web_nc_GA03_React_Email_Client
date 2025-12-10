@@ -458,32 +458,33 @@ export class UsersService {
       .exec();
   }
 
+  // IMAP method commented out
   /**
    * Update IMAP configuration for a user
    */
-  async updateImapConfig(
-    userId: string,
-    imapConfig: any,
-    encryptedPassword: string,
-    smtpConfig?: any,
-    provider?: string,
-  ) {
-    const updateData: any = {
-      imapConfig,
-      imapPassword: encryptedPassword,
-    };
-
-    if (smtpConfig) {
-      updateData.smtpConfig = smtpConfig;
-    }
-
-    if (provider) {
-      updateData.provider = provider;
-    }
-
-    return this.userModel
-      .findByIdAndUpdate(userId, { $set: updateData }, { new: true })
-      .exec();
-  }
+  // async updateImapConfig(
+  //   userId: string,
+  //   imapConfig: any,
+  //   encryptedPassword: string,
+  //   smtpConfig?: any,
+  //   provider?: string,
+  // ) {
+  //   const updateData: any = {
+  //     imapConfig,
+  //     imapPassword: encryptedPassword,
+  //   };
+  //
+  //   if (smtpConfig) {
+  //     updateData.smtpConfig = smtpConfig;
+  //   }
+  //
+  //   if (provider) {
+  //     updateData.provider = provider;
+  //   }
+  //
+  //   return this.userModel
+  //     .findByIdAndUpdate(userId, { $set: updateData }, { new: true })
+  //     .exec();
+  // }
 }
 
