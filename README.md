@@ -4,19 +4,21 @@
 
 ## Tính năng
 
--   **Tích hợp Gmail thời gian thực:** Kết nối với tài khoản Gmail của bạn và hiển thị email trong giao diện bảng điều khiển 3 cột.
+-   **Tích hợp Gmail thời gian thực:** Kết nối với tài khoản Gmail của bạn và hiển thị email trong giao diện bảng Kanban 4 cột.
+-   **Bảng Kanban với 4 cột:** Inbox, To Do, In Progress, Done - kéo thả email giữa các cột với drag & drop.
+-   **Drag & Drop Email Management:** Sử dụng @dnd-kit/core để kéo thả email mượt mà giữa các cột trạng thái.
 -   **Xác thực Google OAuth2 bảo mật:** Sử dụng luồng OAuth2 Authorization Code phía máy chủ an toàn để truy cập dữ liệu Gmail của bạn.
 -   **Hỗ trợ IMAP đa nhà cung cấp:** Kết nối với Gmail, Outlook, Yahoo, iCloud và các email server khác qua IMAP/SMTP.
 -   **XOAUTH2 cho Gmail:** Sử dụng Google OAuth tokens để truy cập IMAP/SMTP mà không cần App Password.
 -   **Mã hóa thông tin đăng nhập:** Mật khẩu IMAP được mã hóa AES-256-GCM trước khi lưu trữ.
 -   **Chức năng email đầy đủ:** Đọc, soạn, trả lời, xóa, gắn dấu sao và quản lý email của bạn.
--   **Bảng Kanban với 4 cột:** Inbox, To Do, In Progress, Done - kéo thả email giữa các cột.
 -   **Snooze/Deferral với đồng bộ Gmail:** Hoãn email với đồng bộ hoá 2 chiều với Gmail API (SNOOZED label).
 -   **Tự động đánh thức (Auto wake-up):** Scheduler backend kiểm tra mỗi phút để khôi phục email đã hết hạn.
 -   **Rollback tự động:** Nếu Gmail API thất bại, thay đổi local sẽ được hoàn tác tự động.
+-   **AI Email Summarization:** Tóm tắt nội dung email tự động bằng Gemini AI với fallback local summarization.
 -   **Bảo mật dựa trên Token:** Sử dụng access và refresh token JWT để giao tiếp API an toàn với proxy backend.
 -   **Tự động làm mới Token:** Tự động làm mới access token đã hết hạn mà không làm gián đoạn người dùng.
--   **Giao diện bảng điều khiển Email 3 cột:** Giao diện người dùng email client tương thích, tương tác.
+-   **Giao diện Kanban hiện đại:** Giao diện người dùng email client tương thích, tương tác với drag & drop.
 
 ## Công nghệ sử dụng
 
@@ -27,9 +29,11 @@
 -   **Vite:** Công cụ xây dựng và máy chủ phát triển nhanh.
 -   **React Router v6:** Thư viện định tuyến khai báo cho React.
 -   **TanStack Query:** Thư viện mạnh mẽ để tìm nạp và quản lý trạng thái dữ liệu.
+-   **@dnd-kit/core:** Thư viện drag & drop hiện đại cho React, lightweight và có khả năng truy cập tốt.
 -   **Axios:** Một HTTP client dựa trên promise.
 -   **Tailwind CSS:** Một framework CSS tập trung vào tiện ích.
 -   **react-hot-toast:** Để hiển thị thông báo toast.
+-   **Quill Editor:** Rich text editor WYSIWYG cho việc soạn email.
 
 ### Backend
 
@@ -40,6 +44,8 @@
 -   **JWT & Google OAuth2 Strategies:** Các chiến lược Passport.js để xác thực dựa trên token và Google.
 -   **googleapis:** Thư viện client API chính thức của Google cho Node.js.
 -   **bcrypt:** Thư viện để mã hóa mật khẩu.
+-   **@nestjs/schedule:** Module scheduler cho NestJS để tự động đánh thức email đã snooze.
+-   **Gemini AI API:** Tích hợp Google Gemini 2.0 Flash cho tính năng tóm tắt email bằng AI.
 
 ## Bắt đầu
 
@@ -84,6 +90,7 @@
     GOOGLE_CALLBACK_URL=http://localhost:3000/auth/google/callback
     ENCRYPTION_KEY=your_32_character_encryption_key_for_aes256
     BCRYPT_SALT_ROUNDS=10
+    GEMINI_API_KEY=your_gemini_api_key_here
     ```
 4.  **Khởi động máy chủ phát triển:**
     ```sh
