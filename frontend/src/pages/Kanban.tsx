@@ -221,24 +221,23 @@ const Kanban: React.FC = () => {
 
                 {/* View Toggle Button */}
           <button
-            className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all"
-            style={{
-              backgroundColor: 'var(--bg-secondary)',
-              color: 'var(--text-primary)',
-              border: '1px solid var(--border-primary)',
-            }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.backgroundColor = 'var(--bg-tertiary)';
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.backgroundColor = 'var(--bg-secondary)';
-            }}
-            onClick={() => navigate('/inbox')}
-            aria-label="Switch to traditional inbox view"
-          >
-            <span className="material-symbols-outlined text-base">view_list</span>
-            <span className="hidden sm:inline">Traditional View</span>
-          </button>
+                  className="w-full px-4 py-3 flex items-center gap-3 transition-all"
+                  style={{ color: 'var(--text-primary)' }}
+                  onClick={() => {
+                    navigate('/inbox');
+                    setShowProfileMenu(false);
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.backgroundColor = 'var(--bg-secondary)';
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.backgroundColor = 'transparent';
+                  }}
+                  role="menuitem"
+                >
+                  <MaterialIcon name="view_list" size={20} />
+                  Traditional View
+                </button>
                 
                 <button
                   className="w-full px-4 py-3 flex items-center gap-3 transition-all"
