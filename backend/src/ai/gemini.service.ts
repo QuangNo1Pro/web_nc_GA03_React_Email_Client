@@ -23,22 +23,21 @@ export class GeminiService implements OnModuleInit {
   async onModuleInit() {
     if (this.hasApiKey) {
       try {
+        // Test with simple list models call instead of generate
         const response = await fetch(
-          `https://generativelanguage.googleapis.com/v1beta/models/gemini-3-pro-preview:generateContent?key=${this.apiKey}`,
+          `https://generativelanguage.googleapis.com/v1beta/models?key=${this.apiKey}`,
           {
-            method: 'POST',
+            method: 'GET',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              contents: [{ parts: [{ text: 'Hello' }] }],
-            }),
           }
         );
 
         if (!response.ok) {
-          throw new Error(`${response.status} ${response.statusText}`);
+          const errorText = await response.text();
+          throw new Error(`${response.status} ${response.statusText}: ${errorText}`);
         }
 
-        this.logger.log('✅ Gemini API connection successful (gemini-3-pro-preview)!');
+        this.logger.log('✅ Gemini API connection successful (gemini-3-pro-preview available)!');
       } catch (e: any) {
         this.logger.error(`❌ Gemini API test failed: ${e.message}`);
         this.logger.warn('⚠️ Falling back to local summarization');
@@ -63,41 +62,46 @@ export class GeminiService implements OnModuleInit {
     // 1. Try Gemini AI via REST API
     if (this.hasApiKey) {
       try {
-        const prompt = `Bạn là trợ lý email thông minh. Nhiệm vụ của bạn là tóm tắt email bằng tiếng Việt.
+        const prompt = `Hãy tóm tắt email sau đây bằng tiếng Việt trong 2-3 câu hoàn chỉnh.
 
-YÊU CẦU:
-1. Tóm tắt NỘI DUNG CHÍNH của email bằng 2-3 câu ngắn gọn, dễ hiểu
-2. BỎ QUA: footer, chữ ký, thông tin liên hệ, unsubscribe links, legal notices
-3. KHÔNG dịch tên công ty, tên sản phẩm, tên riêng (giữ nguyên tiếng Anh)
-4. Tập trung vào: mục đích email, thông tin quan trọng, hành động cần làm (nếu có)
-5. Viết ngắn gọn, súc tích, dễ đọc
-
-EMAIL:
 Tiêu đề: ${subject}
 
-Nội dung:
+Nội dung email:
 ${truncatedInput}
 
-TÓM TẮT (bằng tiếng Việt):`;
+Tóm tắt (viết đầy đủ, không cắt giữa câu):`;
 
         const response = await fetch(
-          `https://generativelanguage.googleapis.com/v1beta/models/gemini-3-pro-preview:generateContent?key=${this.apiKey}`,
+          `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${this.apiKey}`,
           {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
               contents: [{ parts: [{ text: prompt }] }],
+              generationConfig: {
+                temperature: 0.4,
+                topK: 40,
+                topP: 0.95,
+                maxOutputTokens: 500,
+              },
             }),
           }
         );
 
         if (response.ok) {
           const data: any = await response.json();
+          
+          // Log full response for debugging
+          this.logger.debug(`Gemini full response: ${JSON.stringify(data, null, 2)}`);
+          
           const summary = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
+          const finishReason = data.candidates?.[0]?.finishReason;
           
           if (summary) {
-            this.logger.log(`✅ Gemini AI Summary (${summary.length} chars)`);
-            return summary; // Don't enforce length, let it be natural
+            this.logger.log(`✅ Gemini AI Summary (${summary.length} chars, finish: ${finishReason}): "${summary}"`);
+            return summary;
+          } else {
+            this.logger.warn(`⚠️ Gemini returned empty summary. Finish reason: ${finishReason}. Full response: ${JSON.stringify(data).substring(0, 500)}`);
           }
         } else {
           const errorText = await response.text();

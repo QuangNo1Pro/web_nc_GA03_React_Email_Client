@@ -1909,6 +1909,8 @@ await gmail.users.messages.modify({
         throw new InternalServerErrorException('Failed to generate summary');
       }
 
+      this.logger.log(`📄 Summary generated (${summary.length} chars): ${summary.substring(0, 100)}...`);
+
       // Save summary to database
       await this.usersService.updateEmail(userId, messageId, {
         summary,
