@@ -277,6 +277,14 @@ export default function Inbox() {
     queryFn: fetchMailboxes,
   });
 
+  // Debug: log mailboxes data
+  useEffect(() => {
+    if (mailboxes) {
+      console.log('📬 Mailboxes data:', mailboxes);
+      console.log('📬 Sample mailbox:', mailboxes[0]);
+    }
+  }, [mailboxes]);
+
   const {
     data: emailsRaw,
     isLoading: emailsLoading,

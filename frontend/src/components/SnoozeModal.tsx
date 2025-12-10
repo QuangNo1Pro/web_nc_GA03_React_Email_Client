@@ -24,7 +24,7 @@ const SnoozeModal: React.FC<SnoozeModalProps> = ({ email, isOpen, onClose, onSno
   // Quick snooze options
   const quickOptions = [
     {
-      label: '30 seconds (Demo)',
+      label: '30 seconds',
       getValue: () => {
         const date = new Date();
         date.setSeconds(date.getSeconds() + 30);

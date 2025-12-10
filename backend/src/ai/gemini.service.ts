@@ -56,29 +56,55 @@ export class GeminiService implements OnModuleInit {
     subject: string,
     maxLength: number = 300,
   ): Promise<string | null> {
+    this.logger.log('\n========== BẮT ĐẦU TÓM TẮT EMAIL ==========');
+    this.logger.log(`📧 Subject: ${subject}`);
+    this.logger.log(`📝 Original content length: ${emailContent.length} chars`);
+    
     const cleanContent = this.stripHtml(emailContent);
-    const relevantContent = this.extractRelevantContent(cleanContent);
-    const truncatedInput = relevantContent.slice(0, 15000);
+    this.logger.log(`🧹 After stripHtml: ${cleanContent.length} chars`);
+    
+    // Không filter gì cả, lấy toàn bộ nội dung sau khi clean HTML
+    const truncatedInput = cleanContent.slice(0, 15000);
+    this.logger.log(`📏 After truncate: ${truncatedInput.length} chars`);
+    this.logger.log('\n--- NỘI DUNG GỬI CHO GEMINI ---');
+    this.logger.log(truncatedInput.substring(0, 800) + '...\n');
 
     // 1. Try Gemini AI via REST API
     if (this.hasApiKey) {
       try {
-        const prompt = `Bạn là trợ lý email thông minh. Nhiệm vụ của bạn là tóm tắt email bằng tiếng Việt.
+        const prompt = `Bạn là trợ lý email chuyên nghiệp. Nhiệm vụ của bạn là TÓM TẮT (summarize) email, KHÔNG PHẢI ghi lại toàn bộ nội dung.
 
-YÊU CẦU:
-1. Tóm tắt NỘI DUNG CHÍNH của email bằng 2-3 câu ngắn gọn, dễ hiểu
-2. BỎ QUA: footer, chữ ký, thông tin liên hệ, unsubscribe links, legal notices
-3. KHÔNG dịch tên công ty, tên sản phẩm, tên riêng (giữ nguyên tiếng Anh)
-4. Tập trung vào: mục đích email, thông tin quan trọng, hành động cần làm (nếu có)
-5. Viết ngắn gọn, súc tích, dễ đọc
+NGUYÊN TẮC TÓM TẮT QUAN TRỌNG:
+1. TÓM TẮT = Tìm ý chính → Diễn đạt lại ngắn gọn bằng câu văn MƯỢT MÀ, DỄ HIỂU
+2. KHÔNG copy/paste nguyên văn nội dung email
+3. KHÔNG liệt kê chi tiết từng dòng như bảng kê
+4. Chỉ viết 2-3 câu VĂN XUÔI, CHAU CHUỐT, mang tính kể chuyện
+5. Viết 100% TIẾNG VIỆT (chỉ giữ nguyên: tên riêng, số đơn hàng, số tiền)
 
-EMAIL:
+CẤU TRÚC TÓM TẮT:
+- Câu 1: Nội dung chính của email (đơn hàng gì? thông báo gì? yêu cầu gì?)
+- Câu 2: Thông tin quan trọng nhất (số tiền, ngày giờ, địa điểm, v.v.)
+- Câu 3 (nếu cần): Hành động người nhận cần làm
+
+VÍ DỤ TỐT (học theo đây):
+❌ SAI: "Đơn hàng #251206M7MM65MJ đã giao. Mã đơn hàng: #251206M7MM65MJ. Ngày đặt: 06/12/2025. Người bán: kao.official.store. Tổng: ₫98,789."
+✅ ĐÚNG: "Đơn hàng Shopee #251206M7MM65MJ từ kao.official.store đã giao thành công hôm 08/12 với tổng giá trị ₫98,789 (đã giảm từ ₫126,460). Bạn cần xác nhận đã nhận hàng trong vòng 3 ngày để Shopee thanh toán cho người bán."
+
+❌ SAI: "Công ty nâng cấp. Ngày: 15/12. Thời gian: 2 tiếng. Hoàn tất trước 14h."
+✅ ĐÚNG: "Công ty thông báo nâng cấp hệ thống vào ngày 15/12, dịch vụ sẽ tạm ngưng trong 2 tiếng. Khách hàng cần hoàn tất các giao dịch trước 14h để tránh bị ảnh hưởng."
+
+---
+
+EMAIL CẦN TÓM TẮT:
+
 Tiêu đề: ${subject}
 
 Nội dung:
 ${truncatedInput}
 
-TÓM TẮT (bằng tiếng Việt):`;
+---
+
+Hãy tóm tắt email trên thành 2-3 câu VĂN XUÔI MƯỢT MÀ, DỄ HIỂU (KHÔNG liệt kê chi tiết):`;
 
         const response = await fetch(
           `https://generativelanguage.googleapis.com/v1beta/models/gemini-3-pro-preview:generateContent?key=${this.apiKey}`,
@@ -96,7 +122,10 @@ TÓM TẮT (bằng tiếng Việt):`;
           const summary = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
           
           if (summary) {
-            this.logger.log(`✅ Gemini AI Summary (${summary.length} chars)`);
+            this.logger.log('\n--- KẾT QUẢ TỪ GEMINI ---');
+            this.logger.log(`✅ Summary (${summary.length} chars):`);
+            this.logger.log(summary);
+            this.logger.log('========== KẾT THÚC TÓM TẮT ==========\n');
             return summary; // Don't enforce length, let it be natural
           }
         } else {
@@ -109,8 +138,12 @@ TÓM TẮT (bằng tiếng Việt):`;
     }
 
     // 2. Fallback Local
+    this.logger.log('⚠️  Using local summarization fallback');
     const summary = this.localSummarize(truncatedInput, subject, maxLength);
-    this.logger.log(`✅ Local Summary (${summary.length} chars)`);
+    this.logger.log('\n--- KẾT QUẢ LOCAL SUMMARY ---');
+    this.logger.log(`✅ Summary (${summary.length} chars):`);
+    this.logger.log(summary);
+    this.logger.log('========== KẾT THÚC TÓM TẮT ==========\n');
     return summary;
   }
 
@@ -191,82 +224,28 @@ TÓM TẮT (bằng tiếng Việt):`;
       return text.slice(0, maxLength - 3) + '...';
   }
 
-  private extractRelevantContent(text: string): string {
-    if (!text) return '';
-    
-    // Split into lines for processing
-    const lines = text.split('\n').map(line => line.trim()).filter(line => line.length > 0);
-    
-    // Keywords to identify footer/junk content (case insensitive)
-    const footerPatterns = [
-      /unsubscribe/i,
-      /đăng ký nhận/i,
-      /hủy đăng ký/i,
-      /privacy policy/i,
-      /chính sách bảo mật/i,
-      /terms of service/i,
-      /điều khoản/i,
-      /confidential/i,
-      /bảo mật/i,
-      /copyright/i,
-      /all rights reserved/i,
-      /email tự động/i,
-      /vui lòng không trả lời/i,
-      /do not reply/i,
-      /thêm.*vào danh bạ/i,
-      /legal notice/i,
-      /intended for/i,
-      /trân trọng/i,
-      /best regards/i,
-      /sincerely/i,
-      /đội ngũ/i,
-      /liên hệ.*tại đây/i,
-      /contact us/i,
-      /follow us/i,
-      /theo dõi chúng tôi/i,
-      /------/,  // Separator lines
-      /_{5,}/,   // Underscores
-      /={5,}/,   // Equal signs
-    ];
-    
-    const relevantLines: string[] = [];
-    let footerStarted = false;
-    
-    for (const line of lines) {
-      // Stop processing when we hit footer patterns
-      if (footerPatterns.some(pattern => pattern.test(line))) {
-        footerStarted = true;
-      }
-      
-      // Skip very short lines (likely decorative or junk)
-      if (line.length < 10) {
-        continue;
-      }
-      
-      // Keep line if footer hasn't started
-      if (!footerStarted) {
-        relevantLines.push(line);
-      }
-    }
-    
-    return relevantLines.join('\n');
-  }
-
   private stripHtml(html: string): string {
     if (!html) return '';
     
     let text = html;
     
-    // Remove style, script, and other non-content tags
-    text = text.replace(/<style[^>]*>[\s\S]*?<\/style>/gi, ' ');
-    text = text.replace(/<script[^>]*>[\s\S]*?<\/script>/gi, ' ');
-    text = text.replace(/<head[^>]*>[\s\S]*?<\/head>/gi, ' ');
+    // Remove non-content elements completely
+    text = text.replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '');
+    text = text.replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '');
+    text = text.replace(/<head[^>]*>[\s\S]*?<\/head>/gi, '');
+    text = text.replace(/<svg[^>]*>[\s\S]*?<\/svg>/gi, '');
+    text = text.replace(/<!--[\s\S]*?-->/g, ''); // Remove HTML comments
     
-    // Add line breaks for block elements to preserve structure
-    text = text.replace(/<\/?(div|p|br|tr|h[1-6]|li)[^>]*>/gi, '\n');
-    text = text.replace(/<\/td[^>]*>/gi, ' | ');
+    // Convert <br> to newline
+    text = text.replace(/<br\s*\/?>/gi, '\n');
     
-    // Remove all remaining HTML tags
+    // Convert major block elements to newlines
+    text = text.replace(/<\/(p|div|h[1-6]|li|tr)>/gi, '\n');
+    
+    // Convert table cells to space + newline for separation
+    text = text.replace(/<\/(td|th)>/gi, ' \n');
+    
+    // Add space before/after remaining tags to prevent word concatenation
     text = text.replace(/<[^>]+>/g, ' ');
     
     // Decode HTML entities
@@ -275,13 +254,15 @@ TÓM TẮT (bằng tiếng Việt):`;
     text = text.replace(/&lt;/gi, '<');
     text = text.replace(/&gt;/gi, '>');
     text = text.replace(/&quot;/gi, '"');
+    text = text.replace(/&#39;/gi, "'");
+    text = text.replace(/&#8363;/gi, '₫'); // Vietnamese Dong
     text = text.replace(/&#(\d+);/g, (match, dec) => String.fromCharCode(dec));
-    text = text.replace(/&[a-z]+;/gi, ' ');
     
-    // Clean up whitespace
-    text = text.replace(/\n\s*\n\s*\n/g, '\n\n'); // Max 2 consecutive newlines
-    text = text.replace(/[ \t]+/g, ' '); // Multiple spaces to single space
-    text = text.replace(/\n /g, '\n'); // Remove spaces at start of lines
+    // Aggressive whitespace cleanup
+    text = text.replace(/[ \t]+/g, ' '); // Multiple spaces → single space
+    text = text.replace(/ *\n */g, '\n'); // Remove spaces around newlines
+    text = text.replace(/\n{3,}/g, '\n\n'); // Max 2 consecutive newlines
+    text = text.replace(/^\s+|\s+$/gm, ''); // Trim each line
     
     return text.trim();
   }

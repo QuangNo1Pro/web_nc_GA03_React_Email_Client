@@ -161,7 +161,7 @@ const EmailCard: React.FC<EmailCardProps> = ({ email, borderColor, onSnooze, onO
       style={style}
       {...attributes}
       {...listeners}
-      className={`bg-white rounded-lg shadow-sm hover:shadow-md transition-all mb-3 border-l-4 ${borderColor} group ${
+      className={`bg-white rounded-lg shadow-sm hover:shadow-md transition-all mb-3 border-l-4 pl-1 ${borderColor} group ${
         isDragging ? 'z-50' : ''
       }`}
       role="article"
@@ -195,11 +195,8 @@ const EmailCard: React.FC<EmailCardProps> = ({ email, borderColor, onSnooze, onO
 
       {/* Content Preview / AI Summary Box */}
       <div className="px-4 pb-3">
-        <div className="bg-gradient-to-r from-blue-50 to-purple-50 rounded-lg p-3 border border-blue-100 shadow-sm">
+        <div className="bg-gray-100 rounded-lg p-3 border-l-2 border-l-gray-400">
           <div className="flex items-start gap-2">
-            <span className="material-symbols-outlined text-lg text-blue-600 flex-shrink-0 mt-0.5">
-              {localSummary ? 'auto_awesome' : 'description'}
-            </span>
             <div className="flex-1 min-w-0">
               {isGeneratingSummary ? (
                 <div className="flex items-center gap-2">

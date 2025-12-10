@@ -236,6 +236,14 @@ export class UsersService {
     ).exec();
   }
 
+  async updateMailboxUnread(userId: string, mailboxId: string, unread: number) {
+    return this.mailboxModel.findOneAndUpdate(
+      { userId, id: mailboxId },
+      { $set: { messagesUnread: unread } },
+      { new: true, upsert: true }
+    ).exec();
+  }
+
   // ---------- EMAIL ----------
   async saveEmails(userId: string, emails: any[]) {
     const ops = emails.map((email) => ({

@@ -112,7 +112,7 @@ const Kanban: React.FC = () => {
               className="text-xl font-bold hidden sm:block"
               style={{ color: 'var(--text-primary)' }}
             >
-              AI Email Flow
+            React Email Client
             </h1>
           </div>
           
