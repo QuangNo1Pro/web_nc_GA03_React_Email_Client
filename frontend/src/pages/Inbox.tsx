@@ -1315,30 +1315,23 @@ export default function Inbox() {
                     {theme === 'light' ? 'Chế độ tối' : 'Chế độ sáng'}
                   </button>
 
-                  {/* ===== KANBAN TOGGLE BUTTON ===== */}
-            <div className="px-3 pb-2">
-              <button
-                className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-all"
-                style={{
-                  backgroundColor: 'var(--bg-secondary)',
-                  color: 'var(--accent-primary)',
-                  border: '1px solid var(--border-primary)',
-                }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.backgroundColor = 'var(--bg-tertiary)';
-                  e.currentTarget.style.borderColor = 'var(--accent-primary)';
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.backgroundColor = 'var(--bg-secondary)';
-                  e.currentTarget.style.borderColor = 'var(--border-primary)';
-                }}
-                onClick={() => navigate('/kanban')}
-                aria-label="Switch to Kanban view"
-              >
-                <span className="material-symbols-outlined text-base">view_kanban</span>
-                <span>Kanban View</span>
-              </button>
-            </div>
+                   <button
+                    className="w-full px-4 py-3 flex items-center gap-3 transition-all"
+                    style={{ color: 'var(--text-primary)' }}
+                    onClick={() => {
+                      navigate('/kanban');
+                      setShowProfileMenu(false);
+                    }}
+                    onMouseEnter={(e) => {
+                      e.currentTarget.style.backgroundColor = 'var(--bg-secondary)';
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.backgroundColor = 'transparent';
+                    }}
+                  >
+                    <MaterialIcon name="view_kanban" size={20} />
+                    Kanban View
+                  </button>
 
                   <button
                     className="w-full px-4 py-3 flex items-center gap-3 font-medium transition-all"
