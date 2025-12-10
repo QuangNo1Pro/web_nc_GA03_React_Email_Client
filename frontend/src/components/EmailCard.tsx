@@ -18,6 +18,7 @@ interface EmailCardProps {
   email: Email;
   borderColor: string; // Tailwind class for left border color
   onSnooze?: (emailId: string, snoozedUntil: string, simulate: boolean) => void;
+  onOpenEmail?: (emailId: string) => void;
 }
 
 /**
@@ -77,7 +78,7 @@ const openInGmail = (email: Email) => {
   window.open(gmailUrl, '_blank', 'noopener,noreferrer');
 };
 
-const EmailCard: React.FC<EmailCardProps> = ({ email, borderColor, onSnooze }) => {
+const EmailCard: React.FC<EmailCardProps> = ({ email, borderColor, onSnooze, onOpenEmail }) => {
   const [showSnoozeModal, setShowSnoozeModal] = useState(false);
   const [isGeneratingSummary, setIsGeneratingSummary] = useState(false);
   const [localSummary, setLocalSummary] = useState(email.summary);
@@ -246,13 +247,19 @@ const EmailCard: React.FC<EmailCardProps> = ({ email, borderColor, onSnooze }) =
           className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-blue-600 hover:bg-blue-50 rounded transition-colors ml-auto"
           onClick={(e) => {
             e.stopPropagation();
-            openInGmail(email);
+            if (onOpenEmail) {
+              onOpenEmail(email.id);
+            } else {
+              openInGmail(email);
+            }
           }}
           onPointerDown={(e) => e.stopPropagation()} // Prevent drag when clicking button
-          aria-label="Open email in Gmail"
+          aria-label="Open email"
         >
-          <span className="material-symbols-outlined text-base">open_in_new</span>
-          Open Mail
+          <span className="material-symbols-outlined text-base">
+            {onOpenEmail ? 'visibility' : 'open_in_new'}
+          </span>
+          {onOpenEmail ? 'View Detail' : 'Open Mail'}
         </button>
       </div>
 
