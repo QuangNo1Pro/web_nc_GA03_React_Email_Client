@@ -70,12 +70,24 @@ export class AuthService {
       throw new ForbiddenException('Failed to create or find Google user');
     }
 
-    // Prefetch Gmail (optional)
-    try {
-      await this.gmailService.prefetchMailboxesAndEmails(dbUser._id.toString());
-    } catch (err: unknown) {
-      const e = err as Error;
-      console.error('Prefetch Gmail failed:', e.message);
+    const userId = dbUser._id.toString();
+
+    // Check if user needs initial sync
+    const needsSync = await this.usersService.needsInitialSync(userId);
+    
+    if (needsSync) {
+      // Run prefetch in background (don't wait)
+      console.log(`🚀 Starting background sync for new user ${userId}...`);
+      this.gmailService.prefetchMailboxesAndEmails(userId)
+        .then(() => {
+          console.log(`✅ Background sync completed for user ${userId}`);
+        })
+        .catch((err: unknown) => {
+          const e = err as Error;
+          console.error(`❌ Background sync failed for user ${userId}:`, e.message);
+        });
+    } else {
+      console.log(`⏭️ User ${userId} already synced, skipping prefetch`);
     }
 
     return this.login(dbUser);

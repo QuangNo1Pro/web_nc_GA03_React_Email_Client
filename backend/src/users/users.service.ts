@@ -345,6 +345,12 @@ export class UsersService {
     return this.userModel.findByIdAndUpdate(userId, { lastHistoryId: historyId }).exec();
   }
 
+  async needsInitialSync(userId: string): Promise<boolean> {
+    // Check if user has any emails in database
+    const emailCount = await this.emailModel.countDocuments({ userId }).exec();
+    return emailCount === 0;
+  }
+
   // ========== FEATURE II: KANBAN STATUS UPDATE ==========
   async updateEmailStatus(userId: string, messageId: string, status: string) {
     return this.emailModel
@@ -470,29 +476,29 @@ export class UsersService {
   /**
    * Update IMAP configuration for a user
    */
-  // async updateImapConfig(
-  //   userId: string,
-  //   imapConfig: any,
-  //   encryptedPassword: string,
-  //   smtpConfig?: any,
-  //   provider?: string,
-  // ) {
-  //   const updateData: any = {
-  //     imapConfig,
-  //     imapPassword: encryptedPassword,
-  //   };
-  //
-  //   if (smtpConfig) {
-  //     updateData.smtpConfig = smtpConfig;
-  //   }
-  //
-  //   if (provider) {
-  //     updateData.provider = provider;
-  //   }
-  //
-  //   return this.userModel
-  //     .findByIdAndUpdate(userId, { $set: updateData }, { new: true })
-  //     .exec();
-  // }
+  async updateImapConfig(
+    userId: string,
+    imapConfig: any,
+    encryptedPassword: string,
+    smtpConfig?: any,
+    provider?: string,
+  ) {
+    const updateData: any = {
+      imapConfig,
+      imapPassword: encryptedPassword,
+    };
+
+    if (smtpConfig) {
+      updateData.smtpConfig = smtpConfig;
+    }
+
+    if (provider) {
+      updateData.provider = provider;
+    }
+
+    return this.userModel
+      .findByIdAndUpdate(userId, { $set: updateData }, { new: true })
+      .exec();
+  }
 }
 
