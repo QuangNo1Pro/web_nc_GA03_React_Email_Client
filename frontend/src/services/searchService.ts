@@ -1,0 +1,63 @@
+import { api } from './api';
+
+export interface SearchResult {
+  _id: string;
+  sender: string;
+  subject: string;
+  snippet: string;
+  score: number;
+  matchedFields?: string[];
+}
+
+export interface SearchResponse {
+  success: boolean;
+  data: {
+    total: number;
+    results: SearchResult[];
+  };
+}
+
+/**
+ * 🔍 Fuzzy search emails qua API backend
+ * Hỗ trợ typo tolerance + partial match
+ */
+export async function searchEmails(
+  query: string,
+  options?: {
+    fields?: string[];
+    limit?: number;
+    offset?: number;
+  },
+): Promise<SearchResponse> {
+  const params = new URLSearchParams();
+  params.append('q', query);
+
+  if (options?.fields?.length) {
+    params.append('fields', options.fields.join(','));
+  }
+
+  if (options?.limit) {
+    params.append('limit', String(options.limit));
+  }
+
+  if (options?.offset) {
+    params.append('offset', String(options.offset));
+  }
+
+  const url = `/api/search?${params.toString()}`;
+  console.log('[searchService] 📡 Calling:', url);
+  
+  try {
+    const response = await api.get<SearchResponse>(url);
+    console.log('[searchService] ✅ Response:', response.data);
+    return response.data;
+  } catch (error: any) {
+    console.error('[searchService] ❌ Error:', {
+      status: error.response?.status,
+      statusText: error.response?.statusText,
+      data: error.response?.data,
+      message: error.message,
+    });
+    throw error;
+  }
+}

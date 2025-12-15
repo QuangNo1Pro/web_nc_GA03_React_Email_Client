@@ -1,31 +1,22 @@
-import { CanActivate, ExecutionContext, Injectable, UnauthorizedException } from '@nestjs/common';
-import { JwtService } from '@nestjs/jwt';
+import { Injectable, UnauthorizedException } from '@nestjs/common';
+import { AuthGuard } from '@nestjs/passport';
 
+/**
+ * 🔐 JWT Authentication Guard
+ * - Extracts token from Authorization header (Bearer) or cookies
+ * - Uses Passport JWT strategy for validation
+ * - Sets request.user with validated user object
+ */
 @Injectable()
-export class JwtAuthGuard implements CanActivate {
-  constructor(private jwtService: JwtService) {}
-
-  canActivate(context: ExecutionContext): boolean {
-    const request = context.switchToHttp().getRequest();
+export class JwtAuthGuard extends AuthGuard('jwt') {
+  handleRequest(err: any, user: any, info: any, context: any, status: any) {
+    // Log for debugging
+    console.log(`[JwtAuthGuard] err=${err}, user=${user?.sub || 'UNDEFINED'}, info=${info?.message}`);
     
-    // Try to get token from Authorization header first (Bearer token)
-    let token = request.headers.authorization?.split(' ')[1];
-    
-    // If not found, try to get from cookies (HttpOnly cookie)
-    if (!token && request.cookies) {
-      token = request.cookies.access_token;
+    if (err || !user) {
+      const message = info?.message || 'Unauthorized';
+      throw new UnauthorizedException(`JWT Auth failed: ${message}`);
     }
-
-    if (!token) {
-      throw new UnauthorizedException('No token provided');
-    }
-
-    try {
-      const payload = this.jwtService.verify(token);
-      request.user = payload;
-      return true;
-    } catch (error) {
-      throw new UnauthorizedException('Invalid token');
-    }
+    return user;
   }
 }

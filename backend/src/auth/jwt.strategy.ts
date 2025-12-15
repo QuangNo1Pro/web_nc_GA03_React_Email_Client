@@ -30,8 +30,10 @@ export class JwtStrategy extends PassportStrategy(Strategy, 'jwt') {
       return null;
     }
     
+    // Return both 'sub' (from JWT) and 'userId' (from DB) for compatibility
     return {
-      userId: user._id.toString(),
+      sub: payload.sub, // JWT subject (required by new endpoints like search)
+      userId: user._id.toString(), // DB id (for backward compatibility)
       email: user.email,
       picture: user.picture,
       name: user.name,
