@@ -82,8 +82,8 @@ export default function Login() {
   const mutation = useMutation<any, any, FormValues, unknown>({
     mutationFn: (data: FormValues) =>
       api.post('/auth/login', data).then((res) => res.data),
-    onSuccess: async () => {
-      await login();
+    onSuccess: async (response) => {
+      await login(response); // Pass response with access_token
       setServerMessage('Đăng nhập thành công');
       setTimeout(() => navigate('/inbox'), 800);
     },
@@ -108,8 +108,8 @@ export default function Login() {
           tls: data.smtpTls,
         } : undefined,
       }).then((res) => res.data),
-    onSuccess: async () => {
-      await login();
+    onSuccess: async (response) => {
+      await login(response); // Pass response with access_token
       setServerMessage('IMAP login successful');
       setTimeout(() => navigate('/inbox'), 800);
     },
