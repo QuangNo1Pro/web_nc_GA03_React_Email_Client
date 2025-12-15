@@ -41,9 +41,15 @@ const processQueue = (error: any, token = null) => {
   failedQueue = [];
 };
 
-// No need for request interceptor - HttpOnly cookies are sent automatically
+// Add JWT token from localStorage to request headers
 api.interceptors.request.use(
-  (config) => config,
+  (config) => {
+    const token = localStorage.getItem('access_token');
+    if (token) {
+      config.headers.Authorization = `Bearer ${token}`;
+    }
+    return config;
+  },
   (error) => Promise.reject(error)
 );
 
