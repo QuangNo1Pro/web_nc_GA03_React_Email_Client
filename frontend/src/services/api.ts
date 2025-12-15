@@ -41,7 +41,8 @@ const processQueue = (error: any, token = null) => {
   failedQueue = [];
 };
 
-// Add JWT token from localStorage to request headers
+// Add JWT token from localStorage to request headers if available
+// Otherwise rely on HttpOnly cookies sent automatically by withCredentials
 api.interceptors.request.use(
   (config) => {
     const token = localStorage.getItem('access_token');
