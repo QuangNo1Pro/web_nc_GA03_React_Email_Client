@@ -29,6 +29,7 @@ import MaterialIcon from '../components/MaterialIcon';
 import MailboxList from '../components/MailboxList';
 import EmailRow from '../components/EmailRow';
 import EmailList, { EmailListHandle } from '../components/EmailList';
+import SearchResultsList from '../components/SearchResultsList';
 import { useAuth } from "../auth/AuthContext";
 import { useTheme } from '../contexts/ThemeContext';
 import ComposeModal from '../components/ComposeModal';
@@ -93,6 +94,9 @@ export default function Inbox() {
   // 👉 State declarations - must be before effects that use them
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedMailbox, setSelectedMailbox] = useState('INBOX');
+
+  // === Search State ===
+  const [isSearching, setIsSearching] = useState(false);
 
   // === Real-time email sync via SSE ===
   const { isConnected: sseConnected } = useGmailSSE(true);
@@ -1543,8 +1547,23 @@ export default function Inbox() {
               {/* ===== RIGHT: ACTION BUTTONS ===== */}
               <div className="flex items-center gap-0">
 
-                {/* GROUP A: Select All + Refresh (mobile hidden) */}
+                {/* GROUP A: Select All + Search (mobile hidden) */}
                 <div className="hidden md:flex items-center gap-1.5">
+
+                  {/* SEARCH */}
+                  <button
+                    className="w-9 h-9 flex items-center justify-center rounded-lg transition-all"
+                    title="Tìm kiếm email"
+                    onClick={() => setIsSearching(!isSearching)}
+                    onMouseEnter={(e) => {
+                      e.currentTarget.style.backgroundColor = 'var(--bg-hover)';
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.backgroundColor = 'transparent';
+                    }}
+                  >
+                    <MaterialIcon name="search" />
+                  </button>
 
                   {/* SELECT ALL */}
                   <button
@@ -1761,7 +1780,13 @@ export default function Inbox() {
 
           {/* ===== EMAIL LIST ===== */}
           <div className="flex flex-col h-full">
-            <div ref={emailListRef} className="flex-1">
+            {isSearching ? (
+              // SEARCH VIEW
+              <SearchResultsList onClose={() => setIsSearching(false)} />
+            ) : (
+              // NORMAL EMAIL LIST VIEW
+              <>
+              <div ref={emailListRef} className="flex-1">
               {/* LOADING STATE: Show spinner when loading OR fetching without existing data */}
               {emailsLoading || emailsFetching ? (
                 // If fetching with existing data, show email list + refetch indicator
@@ -1881,74 +1906,76 @@ export default function Inbox() {
                   listHeight={listHeight}
                 />
               )}
-            </div>
+              </div>
 
-            {/* Pagination */}
-            <div
-              className="flex items-center text-xs justify-end px-3 border-t "
-              style={{
-                color: 'var(--text-secondary)',
-                backgroundColor: 'var(--bg-primary)',
-                borderColor: 'var(--border-primary)',
-              }}
-            >
-              <span className="mr-4">
-                {filteredEmails.length === 0
-                  ? "0"
-                  : `${startIndex + 1}–${Math.min(
-                    startIndex + pageSize,
-                    filteredEmails.length
-                  )} trong ${filteredEmails.length}`}
-              </span>
-
-              <button
-                className="px-2 py-1.5 transition-all font-base text-gray-700 text-lg" // <-- text-lg tăng chữ
+              {/* Pagination - Only show when NOT searching */}
+              <div
+                className="flex items-center text-xs justify-end px-3 border-t "
                 style={{
-                  opacity: safeCurrentPage <= 1 ? 0.4 : 1,
-                  cursor: safeCurrentPage <= 1 ? 'not-allowed' : 'pointer',
-                }}
-                disabled={safeCurrentPage <= 1}
-                onClick={() => {
-                  setCurrentPage((p) => Math.max(1, p - 1));
-                  setFocusedEmailIndex(0);
-                }}
-                onMouseEnter={(e) => {
-                  if (safeCurrentPage > 1) {
-                    e.currentTarget.style.backgroundColor = 'var(--bg-hover)';
-                  }
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.backgroundColor = 'transparent';
+                  color: 'var(--text-secondary)',
+                  backgroundColor: 'var(--bg-primary)',
+                  borderColor: 'var(--border-primary)',
                 }}
               >
-                ‹
-              </button>
+                <span className="mr-4">
+                  {filteredEmails.length === 0
+                    ? "0"
+                    : `${startIndex + 1}–${Math.min(
+                      startIndex + pageSize,
+                      filteredEmails.length
+                    )} trong ${filteredEmails.length}`}
+                </span>
 
-              <button
-                className="ml-1.5 px-3 rounded-lg transition-all font-medium text-lg" // <-- text-lg tăng chữ
-                style={{
-                  opacity: safeCurrentPage >= totalPages ? 0.3 : 1,
-                  cursor: safeCurrentPage >= totalPages ? 'not-allowed' : 'pointer',
-                }}
-                disabled={safeCurrentPage >= totalPages}
-                onClick={() => {
-                  setCurrentPage((p) => Math.min(totalPages, p + 1));
-                  setFocusedEmailIndex(0);
-                }}
-                onMouseEnter={(e) => {
-                  if (safeCurrentPage < totalPages) {
-                    e.currentTarget.style.backgroundColor = 'var(--bg-hover)';
-                  }
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.backgroundColor = 'transparent';
-                }}
-              >
-                ›
-              </button>
-            </div>
+                <button
+                  className="px-2 py-1.5 transition-all font-base text-gray-700 text-lg"
+                  style={{
+                    opacity: safeCurrentPage <= 1 ? 0.4 : 1,
+                    cursor: safeCurrentPage <= 1 ? 'not-allowed' : 'pointer',
+                  }}
+                  disabled={safeCurrentPage <= 1}
+                  onClick={() => {
+                    setCurrentPage((p) => Math.max(1, p - 1));
+                    setFocusedEmailIndex(0);
+                  }}
+                  onMouseEnter={(e) => {
+                    if (safeCurrentPage > 1) {
+                      e.currentTarget.style.backgroundColor = 'var(--bg-hover)';
+                    }
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.backgroundColor = 'transparent';
+                  }}
+                >
+                  ‹
+                </button>
 
+                <button
+                  className="ml-1.5 px-3 rounded-lg transition-all font-medium text-lg"
+                  style={{
+                    opacity: safeCurrentPage >= totalPages ? 0.3 : 1,
+                    cursor: safeCurrentPage >= totalPages ? 'not-allowed' : 'pointer',
+                  }}
+                  disabled={safeCurrentPage >= totalPages}
+                  onClick={() => {
+                    setCurrentPage((p) => Math.min(totalPages, p + 1));
+                    setFocusedEmailIndex(0);
+                  }}
+                  onMouseEnter={(e) => {
+                    if (safeCurrentPage < totalPages) {
+                      e.currentTarget.style.backgroundColor = 'var(--bg-hover)';
+                    }
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.backgroundColor = 'transparent';
+                  }}
+                >
+                  ›
+                </button>
+              </div>
+              </>
+            )}
           </div>
+
         </div>
 
 
