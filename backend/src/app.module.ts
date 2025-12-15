@@ -6,6 +6,7 @@ import { UsersModule } from './users/users.module';
 import { AuthModule } from './auth/auth.module';
 import { GmailModule } from './gmail/gmail.module';
 import { ImapModule } from './imap/imap.module';
+import { SearchModule } from './search/search.module'; // FEATURE F1: Fuzzy Search
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
@@ -31,6 +32,7 @@ import { ImapModule } from './imap/imap.module';
     AuthModule,
     GmailModule,
     ImapModule,
+    SearchModule, // FEATURE F1: Fuzzy Search
   ],
   controllers: [],
 })
