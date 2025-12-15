@@ -19,7 +19,7 @@ export interface SearchResponse {
 
 /**
  * 🔍 Fuzzy search emails qua API backend
- * Hỗ trợ typo tolerance + partial match
+ * Hỗ trợ typo tolerance + partial match + lọc theo thư mục
  */
 export async function searchEmails(
   query: string,
@@ -27,6 +27,7 @@ export async function searchEmails(
     fields?: string[];
     limit?: number;
     offset?: number;
+    label?: string; // Optional: INBOX, SENT, DRAFT, UNREAD, STARRED, etc.
   },
 ): Promise<SearchResponse> {
   const params = new URLSearchParams();
@@ -42,6 +43,11 @@ export async function searchEmails(
 
   if (options?.offset) {
     params.append('offset', String(options.offset));
+  }
+
+  // Add label filter if provided
+  if (options?.label) {
+    params.append('label', options.label);
   }
 
   const url = `/api/search?${params.toString()}`;

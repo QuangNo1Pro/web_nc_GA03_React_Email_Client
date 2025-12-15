@@ -446,11 +446,11 @@ export default function Inbox() {
 
   /**
    * 🔍 Handle fuzzy search
-   * - Call API /api/search
+   * - Call API /api/search with selected mailbox filter
    * - Switch to search results view
    */
   const handleSearch = async (query: string) => {
-    console.log('[Inbox] 🔍 handleSearch called with:', query);
+    console.log('[Inbox] 🔍 handleSearch called with:', query, 'in mailbox:', selectedMailbox);
     
     // Check auth token status
     const token = localStorage.getItem('access_token');
@@ -467,17 +467,18 @@ export default function Inbox() {
       setIsSearching(true);
       setSearchError(null);
       setIsInSearchMode(true); // Set search mode immediately
-      console.log('[Inbox] 📡 Calling searchEmails API...');
+      console.log('[Inbox] 📡 Calling searchEmails API with label:', selectedMailbox);
       
       const response = await searchEmails(query, {
         fields: ['subject', 'sender', 'body'],
         limit: 50,
         offset: 0,
+        label: selectedMailbox, // ✅ Filter by selected mailbox
       });
 
       console.log('🔍 Search results:', response.data.results);
       setSearchResults(response.data.results);
-      toast.success(`Tìm thấy ${response.data.results.length} kết quả`);
+      toast.success(`Tìm thấy ${response.data.results.length} kết quả trong ${selectedMailbox}`);
     } catch (error) {
       console.error('Search error:', error);
       const errorMsg = error instanceof Error ? error.message : 'Tìm kiếm thất bại';

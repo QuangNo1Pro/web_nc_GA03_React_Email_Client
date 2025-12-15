@@ -26,7 +26,7 @@ export interface SearchResult {
 @Injectable()
 export class SearchService {
   private readonly logger = new Logger(SearchService.name);
-  private fuseInstances = new Map<string, Fuse<Email>>();
+  private fuseInstances = new Map<string, Fuse<Email>>(); // Key: "userId:label"
 
   constructor(
     @InjectModel('Email') private emailModel: Model<Email>,
@@ -37,6 +37,7 @@ export class SearchService {
    * - Hỗ trợ typo tolerance
    * - Hỗ trợ partial match
    * - Trả về kết quả xếp hạng theo relevance
+   * - Hỗ trợ lọc theo label/mailbox
    */
   async search(
     userId: string,
@@ -44,16 +45,37 @@ export class SearchService {
     fields: string[] = ['subject', 'sender'],
     limit: number = 20,
     offset: number = 0,
+    label?: string, // Optional: filter by label (e.g., 'INBOX', 'SENT', 'DRAFT')
   ): Promise<{ total: number; results: SearchResult[] }> {
     try {
-      // 1️⃣ Lấy tất cả emails của user từ MongoDB
+      // 1️⃣ Lấy emails của user từ MongoDB
+      const filter: any = { userId };
+      
+      // Nếu có label, lọc theo labelIds
+      if (label) {
+        if (label === 'UNREAD') {
+          // UNREAD là virtual label - không phải Gmail label
+          filter.unread = true;
+        } else if (label === 'STARRED') {
+          // STARRED là virtual label
+          filter.starred = true;
+        } else if (label === 'ALL_MAIL') {
+          // ALL_MAIL không lọc gì, lấy tất cả emails của user
+          // (giữ nguyên filter chỉ có userId)
+        } else {
+          // Gmail labels: INBOX, SENT, DRAFT, TRASH, SPAM, etc.
+          // labelIds là array, nên dùng $in để check nếu label có trong array
+          filter.labelIds = { $in: [label] };
+        }
+      }
+      
       const emails = await this.emailModel
-        .find({ userId })
-        .select('messageId snippet body payload')
+        .find(filter)
+        .select('messageId snippet body payload labelIds unread starred')
         .lean()
         .exec();
 
-      this.logger.log(`[Search] User ${userId}: Loaded ${emails.length} emails`);
+      this.logger.log(`[Search] User ${userId}, label="${label || 'ALL'}": Loaded ${emails.length} emails`);
 
       if (emails.length === 0) {
         return { total: 0, results: [] };
@@ -69,8 +91,10 @@ export class SearchService {
         };
       });
 
-      // 2️⃣ Build Fuse.js index (hoặc dùng cached instance)
-      let fuse = this.fuseInstances.get(userId);
+      // 2️⃣ Build Fuse.js index (cache theo userId:label để tránh xung đột)
+      const cacheKey = `${userId}:${label || 'ALL'}`;
+      let fuse = this.fuseInstances.get(cacheKey);
+      
       if (!fuse) {
         fuse = new Fuse(enrichedEmails, {
           keys: [
@@ -85,13 +109,15 @@ export class SearchService {
           includeScore: true,
           includeMatches: true,
         });
-        this.fuseInstances.set(userId, fuse);
-        this.logger.log(`[Search] Built Fuse index for user ${userId}`);
+        this.fuseInstances.set(cacheKey, fuse);
+        this.logger.log(`[Search] Built Fuse index for ${cacheKey}`);
+      } else {
+        this.logger.log(`[Search] Using cached Fuse index for ${cacheKey}`);
       }
 
       // 3️⃣ Thực hiện search
       const searchResults = fuse.search(query);
-      this.logger.log(`[Search] Query "${query}": Found ${searchResults.length} matches`);
+      this.logger.log(`[Search] Query "${query}" in ${cacheKey}: Found ${searchResults.length} matches`);
 
       // 4️⃣ Format kết quả
       const results: SearchResult[] = searchResults
@@ -141,8 +167,19 @@ export class SearchService {
     return { sender, subject };
   }
 
-  clearCache(userId: string): void {
-    this.fuseInstances.delete(userId);
-    this.logger.log(`[Search] Cleared cache for user ${userId}`);
+  clearCache(userId: string, label?: string): void {
+    if (label) {
+      // Clear specific label cache
+      const cacheKey = `${userId}:${label}`;
+      this.fuseInstances.delete(cacheKey);
+      this.logger.log(`[Search] Cleared cache for ${cacheKey}`);
+    } else {
+      // Clear all caches for user
+      const keysToDelete = Array.from(this.fuseInstances.keys()).filter(key => 
+        key.startsWith(`${userId}:`)
+      );
+      keysToDelete.forEach(key => this.fuseInstances.delete(key));
+      this.logger.log(`[Search] Cleared all caches for user ${userId}`);
+    }
   }
 }

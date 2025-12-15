@@ -21,6 +21,7 @@ interface SearchQueryDto {
   fields?: string;
   limit?: string | number;
   offset?: string | number;
+  label?: string; // Optional: filter by mailbox/label (INBOX, SENT, DRAFT, etc.)
 }
 
 @Controller('/api/search')
@@ -30,15 +31,17 @@ export class SearchController {
   constructor(private readonly searchService: SearchService) {}
 
   /**
-   * 🔍 GET /api/search?q=<query>&fields=subject,sender&limit=20&offset=0
+   * 🔍 GET /api/search?q=<query>&fields=subject,sender&limit=20&offset=0&label=INBOX
    * 
    * Fuzzy search emails với typo tolerance + partial match
+   * Hỗ trợ lọc theo thư mục/label
    * 
    * Query params:
    *   - q (required): Search query
    *   - fields (optional): Comma-separated fields (default: subject,sender)
    *   - limit (optional): Max results (default: 20, max: 100)
    *   - offset (optional): Pagination offset (default: 0)
+   *   - label (optional): Filter by label/mailbox (INBOX, SENT, DRAFT, UNREAD, STARRED, etc.)
    */
   @UseGuards(JwtAuthGuard)
   @Get()
@@ -48,7 +51,7 @@ export class SearchController {
   ) {
     try {
       // 🔐 Debug JWT + user
-      this.logger.log(`[Search] Request: q="${query.q}", user=${user?.sub || 'UNDEFINED'}`);
+      this.logger.log(`[Search] Request: q="${query.q}", label="${query.label}", user=${user?.sub || 'UNDEFINED'}`);
       
       if (!user || !user.sub) {
         this.logger.error('[Search] ❌ User not authenticated or missing sub');
@@ -65,11 +68,12 @@ export class SearchController {
       const fields = query.fields ? query.fields.split(',').map(f => f.trim()) : ['subject', 'sender'];
       const limit = Math.min(Number(query.limit) || 20, 100);
       const offset = Math.max(Number(query.offset) || 0, 0);
+      const label = query.label?.trim(); // Optional label filter
 
-      this.logger.log(`🔍 Search: user=${userId}, query="${searchQuery}", fields=${fields.join(',')}`);
+      this.logger.log(`🔍 Search: user=${userId}, query="${searchQuery}", fields=${fields.join(',')}, label="${label || 'ALL'}"`);
 
-      // 2️⃣ Thực hiện search
-      const result = await this.searchService.search(userId, searchQuery, fields, limit, offset);
+      // 2️⃣ Thực hiện search (có tùy chọn lọc theo label)
+      const result = await this.searchService.search(userId, searchQuery, fields, limit, offset, label);
 
       return {
         success: true,
