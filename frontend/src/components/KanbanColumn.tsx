@@ -17,6 +17,14 @@ interface KanbanColumnProps {
 }
 
 const KanbanColumn: React.FC<KanbanColumnProps> = ({ column, onSnooze, onOpenEmail }) => {
+  // Debug log
+  if (column.emails.length > 0) {
+    console.log(`[KanbanColumn] "${column.title}" rendering with ${column.emails.length} emails:`, {
+      emailIds: column.emails.map(e => e.id).slice(0, 3),
+      emailSubjects: column.emails.map(e => e.subject).slice(0, 3),
+    });
+  }
+
   // FEATURE II: Make column droppable
   const { setNodeRef, isOver } = useDroppable({
     id: column.id,

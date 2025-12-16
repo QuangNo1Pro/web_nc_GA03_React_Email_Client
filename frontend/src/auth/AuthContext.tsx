@@ -23,7 +23,11 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     fetchUserProfile();
   }, [fetchUserProfile]);
 
-  const login = async () => {
+  const login = async (response?: any) => {
+    // Save token to localStorage if provided (from login response)
+    if (response?.access_token) {
+      localStorage.setItem('access_token', response.access_token);
+    }
     // After backend sets cookies, fetch profile to update state
     await fetchUserProfile();
   };
@@ -34,6 +38,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     } catch (error) {
       console.error('Logout failed', error);
     } finally {
+      localStorage.removeItem('access_token');
       setUser(null);
     }
   };

@@ -155,6 +155,16 @@ const EmailCard: React.FC<EmailCardProps> = ({ email, borderColor, onSnooze, onO
     return 'Nhấn để tạo tóm tắt AI...';
   };
 
+  // Calculate relevance percentage (invert score: 0=perfect match, 1=no match)
+  const getRelevancePercent = (): number => {
+    if (typeof (email as any).score === 'number') {
+      return Math.round((1 - (email as any).score) * 100);
+    }
+    return 0;
+  };
+
+  const relevancePercent = getRelevancePercent();
+
   return (
     <div
       ref={setNodeRef}
@@ -168,7 +178,7 @@ const EmailCard: React.FC<EmailCardProps> = ({ email, borderColor, onSnooze, onO
       aria-label={`Email from ${senderName}: ${email.subject}`}
       aria-grabbed={isDragging}
     >
-      {/* Card Header: Avatar, Sender, Timestamp */}
+      {/* Card Header: Avatar, Sender, Timestamp, Score */}
       <div className="flex items-center gap-3 p-4 pb-3">
         <div
           className={`w-10 h-10 rounded-full flex items-center justify-center text-white font-semibold text-sm flex-shrink-0 ${avatarColorClass}`}
@@ -181,8 +191,21 @@ const EmailCard: React.FC<EmailCardProps> = ({ email, borderColor, onSnooze, onO
             {senderName}
           </div>
         </div>
-        <div className="text-xs text-gray-500 flex-shrink-0">
-          {timestamp}
+        <div className="flex items-center gap-2 flex-shrink-0">
+          {relevancePercent > 0 && (
+            <span
+              className="px-2 py-1 rounded text-xs font-medium"
+              style={{
+                backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                color: '#3b82f6',
+              }}
+            >
+              {relevancePercent}% match
+            </span>
+          )}
+          <div className="text-xs text-gray-500">
+            {timestamp}
+          </div>
         </div>
       </div>
 

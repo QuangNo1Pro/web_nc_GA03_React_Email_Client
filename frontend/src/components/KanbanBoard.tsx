@@ -17,10 +17,13 @@ import toast from 'react-hot-toast';
 import EmailDetailModal from './EmailDetailModal';
 import { useNavigate } from 'react-router-dom';
 
-const KanbanBoard: React.FC = () => {
+const KanbanBoard: React.FC<{ 
+  filteredEmails?: any[];
+  isSearchMode?: boolean;
+}> = ({ filteredEmails, isSearchMode }) => {
   const {
     columns,
-    emails,
+    emails: allEmails,
     isLoading,
     error,
     optimisticUpdateEmailStatus,
@@ -58,7 +61,7 @@ const KanbanBoard: React.FC = () => {
       const emailDetail = await fetchEmail(emailId);
       
       // Find the email from list for metadata
-      const listEmail = emails.find(e => e.id === emailId);
+      const listEmail = allEmails.find(e => e.id === emailId);
       
       // Construct complete email object (similar to Inbox.tsx)
       const completeEmail = {
@@ -89,7 +92,7 @@ const KanbanBoard: React.FC = () => {
     } finally {
       setIsLoadingDetail(false);
     }
-  }, [emails]);
+  }, [allEmails]);
 
   // Handle closing modal
   const handleCloseModal = useCallback(() => {
@@ -138,7 +141,7 @@ const KanbanBoard: React.FC = () => {
     simulate: boolean
   ) => {
     // Find email to get original status
-    const email = emails.find(e => e.id === emailId);
+    const email = allEmails.find(e => e.id === emailId);
     if (!email) return;
 
     const originalStatus = email.status || 'Inbox';
@@ -181,7 +184,7 @@ const KanbanBoard: React.FC = () => {
         position: 'bottom-right',
       });
     }
-  }, [emails, snoozeEmailOptimistic, updateEmailSnoozeFromServer, revertSnooze]);
+  }, [allEmails, snoozeEmailOptimistic, updateEmailSnoozeFromServer, revertSnooze]);
 
   // Loading state
   if (isLoading) {
@@ -223,10 +226,79 @@ const KanbanBoard: React.FC = () => {
   // Main board: chia đều các cột, không thừa khoảng trống
   // FEATURE II: Wrapped with DnD provider for drag & drop
   // FEATURE III: Pass handleSnooze callback to columns
+  
+  // Fallback columns in case useEmails hook hasn't loaded yet
+  const fallbackColumns = [
+    { id: 'Inbox' as const, title: 'Inbox', color: 'border-l-blue-500', emails: [] },
+    { id: 'To Do' as const, title: 'To Do', color: 'border-l-yellow-500', emails: [] },
+    { id: 'In Progress' as const, title: 'In Progress', color: 'border-l-purple-500', emails: [] },
+    { id: 'Done' as const, title: 'Done', color: 'border-l-green-500', emails: [] },
+  ];
+  
+  const activeColumns = columns && columns.length > 0 ? columns : fallbackColumns;
+  
+  // Transform search results to have all required Email fields
+  // And merge with existing emails to get their status field
+  const normalizedFilteredEmails = filteredEmails?.map(result => {
+    // Try to find this email in the existing allEmails list to get its status
+    const existingEmail = allEmails.find(e => e.id === result.id);
+    
+    return {
+      id: result.id || result._id || '', // Ensure id field exists
+      sender: result.sender || 'Unknown',
+      subject: result.subject || '(No subject)',
+      snippet: result.snippet || '',
+      timestamp: result.timestamp || Date.now(),
+      summary: result.summary || '',
+      read: result.read ?? false,
+      starred: result.starred ?? false,
+      score: result.score,
+      matchedFields: result.matchedFields,
+      status: existingEmail?.status || 'Inbox', // Get status from existing email or default to Inbox
+      ...result, // Spread rest of fields
+    };
+  }) || [];
+
+  console.log('[KanbanBoard] Search results with status:', {
+    totalEmails: normalizedFilteredEmails.length,
+    byStatus: {
+      Inbox: normalizedFilteredEmails.filter(e => e.status === 'Inbox').length,
+      'To Do': normalizedFilteredEmails.filter(e => e.status === 'To Do').length,
+      'In Progress': normalizedFilteredEmails.filter(e => e.status === 'In Progress').length,
+      Done: normalizedFilteredEmails.filter(e => e.status === 'Done').length,
+    }
+  });
+  
+  const displayColumns = isSearchMode && filteredEmails
+    ? activeColumns.map(col => {
+        // Distribute search results into columns based on their status field
+        const emailsForCol = normalizedFilteredEmails.filter(e => e.status === col.id);
+        console.log(`[KanbanBoard] Column "${col.id}" will have ${emailsForCol.length} emails`);
+        return {
+          ...col,
+          emails: emailsForCol,
+        };
+      })
+    : activeColumns;
+
+  // If in search mode with filtered emails, organize them into columns by status
+  // Search results don't have status field, so distribute them across all columns evenly
+  // or show all in INBOX by default
+  console.log('[KanbanBoard] Render:', { 
+    isSearchMode, 
+    filteredEmailsCount: filteredEmails?.length,
+    columnsCount: columns?.length,
+    displayColumnsCount: displayColumns.length,
+    columnsIds: columns?.map(c => c.id),
+    displayCondition: isSearchMode && filteredEmails,
+    displayColumnsInbox: displayColumns.find(c => c.id === 'Inbox')?.emails?.length || 0,
+    filteredEmailsSample: filteredEmails?.slice(0, 2)
+  });
+
   return (
     <>
       <KanbanDndProvider
-        emails={emails}
+        emails={allEmails}
         onEmailMove={(emailId, newStatus) => {
           optimisticUpdateEmailStatus(emailId, newStatus);
         }}
@@ -240,7 +312,7 @@ const KanbanBoard: React.FC = () => {
         <div
           className="grid h-full w-full bg-gray-100"
           style={{
-            gridTemplateColumns: `repeat(${columns.length}, 1fr)`,
+            gridTemplateColumns: `repeat(${displayColumns.length}, 1fr)`,
             gap: '24px', // khoảng cách giữa các cột
             padding: '24px',
             overflowX: 'auto',
@@ -249,7 +321,7 @@ const KanbanBoard: React.FC = () => {
           role="main"
           aria-label="Kanban board"
         >
-          {columns.map((column) => (
+          {displayColumns.map((column) => (
             <KanbanColumn 
               key={column.id} 
               column={column}

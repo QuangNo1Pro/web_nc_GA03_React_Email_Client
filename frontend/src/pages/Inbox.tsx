@@ -9,6 +9,9 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
 import * as ReactWindow from 'react-window';
 import { api } from '../services/api';
+import { searchEmails, SearchResult } from '../services/searchService';
+import { SearchBar } from '../components/SearchBar';
+import { SearchResultsList } from '../components/SearchResultsList';
 import {
   fetchMailboxes,
   fetchEmails,
@@ -93,6 +96,18 @@ export default function Inbox() {
   // 👉 State declarations - must be before effects that use them
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedMailbox, setSelectedMailbox] = useState('INBOX');
+  
+  // 🔍 Fuzzy search state (F2)
+  const [isSearching, setIsSearching] = useState(false);
+  const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
+  const [searchError, setSearchError] = useState<string | null>(null);
+  const [isInSearchMode, setIsInSearchMode] = useState(false);
+
+  // Debug: log search state changes
+  useEffect(() => {
+    console.log('[Inbox] 🔍 Search state:', { isInSearchMode, isSearching, resultsCount: searchResults.length, error: searchError });
+  }, [isInSearchMode, isSearching, searchResults, searchError]);
+
 
   // === Real-time email sync via SSE ===
   const { isConnected: sseConnected } = useGmailSSE(true);
@@ -429,6 +444,62 @@ export default function Inbox() {
     }
   };
 
+  /**
+   * 🔍 Handle fuzzy search
+   * - Call API /api/search with selected mailbox filter
+   * - Switch to search results view
+   */
+  const handleSearch = async (query: string) => {
+    console.log('[Inbox] 🔍 handleSearch called with:', query, 'in mailbox:', selectedMailbox);
+    
+    // Check auth token status
+    const token = localStorage.getItem('access_token');
+    console.log('[Inbox] 🔐 Token in localStorage:', token ? `Exists (${token.substring(0,20)}...)` : 'NOT FOUND');
+    
+    if (!query.trim()) {
+      setIsInSearchMode(false);
+      setSearchResults([]);
+      setSearchError(null);
+      return;
+    }
+
+    try {
+      setIsSearching(true);
+      setSearchError(null);
+      setIsInSearchMode(true); // Set search mode immediately
+      console.log('[Inbox] 📡 Calling searchEmails API with label:', selectedMailbox);
+      
+      const response = await searchEmails(query, {
+        fields: ['subject', 'sender', 'body'],
+        limit: 50,
+        offset: 0,
+        label: selectedMailbox, // ✅ Filter by selected mailbox
+      });
+
+      console.log('🔍 Search results:', response.data.results);
+      setSearchResults(response.data.results);
+      toast.success(`Tìm thấy ${response.data.results.length} kết quả trong ${selectedMailbox}`);
+    } catch (error) {
+      console.error('Search error:', error);
+      const errorMsg = error instanceof Error ? error.message : 'Tìm kiếm thất bại';
+      setSearchError(errorMsg);
+      setSearchResults([]); // Clear results on error
+      toast.error(errorMsg);
+    } finally {
+      setIsSearching(false);
+    }
+  };
+
+  /**
+   * 🔙 Exit search mode + back to normal inbox view
+   */
+  const handleClearSearch = () => {
+    setIsInSearchMode(false);
+    setSearchQuery('');
+    setSearchResults([]);
+    setSearchError(null);
+  };
+
   const handleMailboxSelect = (mailboxId: string) => {
     setSelectedMailbox(mailboxId);
     setSelectedEmail(null);
@@ -443,6 +514,10 @@ export default function Inbox() {
   };
 
   // Keyboard navigation (trên trang hiện tại)
+  useEffect(() => {
+    console.log('[Inbox] State changed - selectedEmail:', selectedEmail, 'mobileView:', mobileView);
+  }, [selectedEmail, mobileView]);
+
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (!paginatedEmails || paginatedEmails.length === 0) return;
@@ -1420,37 +1495,12 @@ export default function Inbox() {
           >
             {/* ===== SEARCH BAR ===== */}
             <div className="px-3 pt-3 pb-2">
-              <div
-                className="flex items-center rounded-lg px-3 py-2 transition-all"
-                style={{
-                  backgroundColor: 'var(--bg-secondary)',
-                  border: '1px solid var(--border-primary)',
-                }}
-                onFocus={(e: any) => {
-                  e.currentTarget.style.borderColor = 'var(--accent-primary)';
-                }}
-                onBlur={(e: any) => {
-                  e.currentTarget.style.borderColor = 'var(--border-primary)';
-                }}
-              >
-                <span
-                  className="material-symbols-outlined mr-3 flex-shrink-0"
-                  style={{ color: 'var(--text-tertiary)', fontSize: '20px' }}
-                >
-                  search
-                </span>
-                <input
-                  type="text"
-                  placeholder="Tìm email..."
-                  className="outline-none w-full text-sm"
-                  style={{
-                    backgroundColor: 'transparent',
-                    color: 'var(--text-primary)',
-                  }}
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                />
-              </div>
+              <SearchBar
+                onSearch={handleSearch}
+                isLoading={isSearching}
+                onClear={handleClearSearch}
+                placeholder="Tìm email (typo-tolerant)..."
+              />
             </div>
 
             
@@ -1762,128 +1812,147 @@ export default function Inbox() {
           {/* ===== EMAIL LIST ===== */}
           <div className="flex flex-col h-full">
             <div ref={emailListRef} className="flex-1">
-              {/* LOADING STATE: Show spinner when loading OR fetching without existing data */}
-              {emailsLoading || emailsFetching ? (
-                // If fetching with existing data, show email list + refetch indicator
-                // Otherwise show full loading spinner
-                (emailsFetching && emails && emails.length > 0) ? (
-                  // Background refetch - show list with indicator
-                  <div className="relative h-full">
-                    
-                    <EmailList
-                      ref={emailListComponentRef}
-                      emails={paginatedEmails}
-                      selectedEmail={selectedEmail}
-                      selectedEmails={selectedEmails}
-                      starredState={starredState}
-                      readState={readState}
-                      showCheckboxes={showCheckboxes}
-                      handleToggleCheckbox={handleToggleCheckbox}
-                      handleEmailSelect={handleEmailSelect}
-                      handleToggleRead={handleToggleRead}
-                      handleToggleStar={handleToggleStar}
-                      focusedEmailIndex={focusedEmailIndex}
-                      user={user}
-                      listHeight={listHeight}
-                    />
-                  </div>
-                ) : (
-                  // Initial load - show full spinner
-                  <div
-                    style={{
-                      display: 'flex',
-                      flexDirection: 'column',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      height: '100%',
-                      width: '100%',
-                      minHeight: '320px',
-                    }}
-                  >
-                    <div className="spinner" style={{ marginBottom: '16px' }} />
-                    <p style={{ fontSize: '14px', opacity: 0.7, textAlign: 'center' }}>Đang tải email...</p>
-                  </div>
-                )
-              ) : 
-              /* ERROR STATE: Only show when NOT loading/fetching and there's an actual error */
-              emailsError ? (
-                <div className="flex items-center justify-center h-full">
-                  <div className="text-center" style={{ color: 'var(--text-secondary)' }}>
-                    <div style={{ fontSize: '48px', marginBottom: '12px', opacity: 0.5 }}>
-                      <MaterialIcon name="error_outline" />
-                    </div>
-                    <p style={{ fontSize: '14px', fontWeight: 500 }}>Không thể tải email</p>
-                    <p style={{ fontSize: '12px', marginTop: '8px', opacity: 0.7 }}>
-                      Vui lòng thử lại sau
-                    </p>
-                  </div>
-                </div>
-              ) : 
-              /* EMPTY MAILBOX: No emails at all after successful load */
-              !emails || emails.length === 0 ? (
-                <div className="flex items-center justify-center h-full">
-                  <div className="text-center" style={{ color: 'var(--text-secondary)' }}>
-                    <div style={{ fontSize: '64px', marginBottom: '16px', opacity: 0.3 }}>
-                      <MaterialIcon name={
-                        selectedMailbox === 'DRAFT' ? 'draft' :
-                        selectedMailbox === 'SENT' ? 'send' :
-                        selectedMailbox === 'TRASH' ? 'delete' :
-                        selectedMailbox === 'SPAM' ? 'report' :
-                        'inbox'
-                      } />
-                    </div>
-                    <p style={{ fontSize: '16px', fontWeight: 500 }}>
-                      Không có email nào trong {currentMailboxLabel}
-                    </p>
-                    <p style={{ fontSize: '13px', marginTop: '8px', opacity: 0.7 }}>
-                      {selectedMailbox === 'DRAFT' && 'Bắt đầu soạn thư nháp mới'}
-                      {selectedMailbox === 'SENT' && 'Chưa có email đã gửi'}
-                      {selectedMailbox === 'TRASH' && 'Thùng rác trống'}
-                      {selectedMailbox === 'SPAM' && 'Không có thư rác'}
-                      {selectedMailbox === 'INBOX' && 'Hộp thư đến trống'}
-                      {!['DRAFT', 'SENT', 'TRASH', 'SPAM', 'INBOX'].includes(selectedMailbox) && 'Thư mục trống'}
-                    </p>
-                  </div>
-                </div>
-              ) : 
-              /* FILTERED EMPTY: Has emails but filter/search returned nothing */
-              paginatedEmails.length === 0 ? (
-                <div className="flex items-center justify-center h-full">
-                  <div className="text-center" style={{ color: 'var(--text-secondary)' }}>
-                    <div style={{ fontSize: '64px', marginBottom: '16px', opacity: 0.3 }}>
-                      <MaterialIcon name="search" />
-                    </div>
-                    <p style={{ fontSize: '16px', fontWeight: 500 }}>
-                      Không tìm thấy email nào
-                    </p>
-                    <p style={{ fontSize: '13px', marginTop: '8px', opacity: 0.7 }}>
-                      Thử thay đổi bộ lọc hoặc từ khóa tìm kiếm
-                    </p>
-                  </div>
-                </div>
-              ) : 
-              /* SUCCESS STATE: Display email list */
-              (
-                <EmailList
-                  ref={emailListComponentRef}
-                  emails={paginatedEmails}
-                  selectedEmail={selectedEmail}
-                  selectedEmails={selectedEmails}
-                  starredState={starredState}
-                  readState={readState}
-                  showCheckboxes={showCheckboxes}
-                  handleToggleCheckbox={handleToggleCheckbox}
-                  handleEmailSelect={handleEmailSelect}
-                  handleToggleRead={handleToggleRead}
-                  handleToggleStar={handleToggleStar}
-                  focusedEmailIndex={focusedEmailIndex}
-                  user={user}
-                  listHeight={listHeight}
+              {/* 🔍 SEARCH RESULTS MODE */}
+              {isInSearchMode ? (
+                <SearchResultsList
+                  results={searchResults}
+                  isLoading={isSearching}
+                  error={searchError || undefined}
+                  onBack={handleClearSearch}
+                  onSelectEmail={(email) => {
+                    console.log('[Inbox] Search result selected:', email.id);
+                    setSelectedEmail(email.id);
+                    setMobileView('email');
+                  }}
                 />
+              ) : (
+              /* NORMAL INBOX MODE */
+              <>
+                {/* LOADING STATE: Show spinner when loading OR fetching without existing data */}
+                {emailsLoading || emailsFetching ? (
+                  // If fetching with existing data, show email list + refetch indicator
+                  // Otherwise show full loading spinner
+                  (emailsFetching && emails && emails.length > 0) ? (
+                    // Background refetch - show list with indicator
+                    <div className="relative h-full">
+                      
+                      <EmailList
+                        ref={emailListComponentRef}
+                        emails={paginatedEmails}
+                        selectedEmail={selectedEmail}
+                        selectedEmails={selectedEmails}
+                        starredState={starredState}
+                        readState={readState}
+                        showCheckboxes={showCheckboxes}
+                        handleToggleCheckbox={handleToggleCheckbox}
+                        handleEmailSelect={handleEmailSelect}
+                        handleToggleRead={handleToggleRead}
+                        handleToggleStar={handleToggleStar}
+                        focusedEmailIndex={focusedEmailIndex}
+                        user={user}
+                        listHeight={listHeight}
+                      />
+                    </div>
+                  ) : (
+                    // Initial load - show full spinner
+                    <div
+                      style={{
+                        display: 'flex',
+                        flexDirection: 'column',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        height: '100%',
+                        width: '100%',
+                        minHeight: '320px',
+                      }}
+                    >
+                      <div className="spinner" style={{ marginBottom: '16px' }} />
+                      <p style={{ fontSize: '14px', opacity: 0.7, textAlign: 'center' }}>Đang tải email...</p>
+                    </div>
+                  )
+                ) : 
+                /* ERROR STATE: Only show when NOT loading/fetching and there's an actual error */
+                emailsError ? (
+                  <div className="flex items-center justify-center h-full">
+                    <div className="text-center" style={{ color: 'var(--text-secondary)' }}>
+                      <div style={{ fontSize: '48px', marginBottom: '12px', opacity: 0.5 }}>
+                        <MaterialIcon name="error_outline" />
+                      </div>
+                      <p style={{ fontSize: '14px', fontWeight: 500 }}>Không thể tải email</p>
+                      <p style={{ fontSize: '12px', marginTop: '8px', opacity: 0.7 }}>
+                        Vui lòng thử lại sau
+                      </p>
+                    </div>
+                  </div>
+                ) : 
+                /* EMPTY MAILBOX: No emails at all after successful load */
+                !emails || emails.length === 0 ? (
+                  <div className="flex items-center justify-center h-full">
+                    <div className="text-center" style={{ color: 'var(--text-secondary)' }}>
+                      <div style={{ fontSize: '64px', marginBottom: '16px', opacity: 0.3 }}>
+                        <MaterialIcon name={
+                          selectedMailbox === 'DRAFT' ? 'draft' :
+                          selectedMailbox === 'SENT' ? 'send' :
+                          selectedMailbox === 'TRASH' ? 'delete' :
+                          selectedMailbox === 'SPAM' ? 'report' :
+                          'inbox'
+                        } />
+                      </div>
+                      <p style={{ fontSize: '16px', fontWeight: 500 }}>
+                        Không có email nào trong {currentMailboxLabel}
+                      </p>
+                      <p style={{ fontSize: '13px', marginTop: '8px', opacity: 0.7 }}>
+                        {selectedMailbox === 'DRAFT' && 'Bắt đầu soạn thư nháp mới'}
+                        {selectedMailbox === 'SENT' && 'Chưa có email đã gửi'}
+                        {selectedMailbox === 'TRASH' && 'Thùng rác trống'}
+                        {selectedMailbox === 'SPAM' && 'Không có thư rác'}
+                        {selectedMailbox === 'INBOX' && 'Hộp thư đến trống'}
+                        {!['DRAFT', 'SENT', 'TRASH', 'SPAM', 'INBOX'].includes(selectedMailbox) && 'Thư mục trống'}
+                      </p>
+                    </div>
+                  </div>
+                ) : 
+                /* FILTERED EMPTY: Has emails but filter/search returned nothing */
+                paginatedEmails.length === 0 ? (
+                  <div className="flex items-center justify-center h-full">
+                    <div className="text-center" style={{ color: 'var(--text-secondary)' }}>
+                      <div style={{ fontSize: '64px', marginBottom: '16px', opacity: 0.3 }}>
+                        <MaterialIcon name="search" />
+                      </div>
+                      <p style={{ fontSize: '16px', fontWeight: 500 }}>
+                        Không tìm thấy email nào
+                      </p>
+                      <p style={{ fontSize: '13px', marginTop: '8px', opacity: 0.7 }}>
+                        Thử thay đổi bộ lọc hoặc từ khóa tìm kiếm
+                      </p>
+                    </div>
+                  </div>
+                ) : 
+                /* SUCCESS STATE: Display email list */
+                (
+                  <EmailList
+                    ref={emailListComponentRef}
+                    emails={paginatedEmails}
+                    selectedEmail={selectedEmail}
+                    selectedEmails={selectedEmails}
+                    starredState={starredState}
+                    readState={readState}
+                    showCheckboxes={showCheckboxes}
+                    handleToggleCheckbox={handleToggleCheckbox}
+                    handleEmailSelect={handleEmailSelect}
+                    handleToggleRead={handleToggleRead}
+                    handleToggleStar={handleToggleStar}
+                    focusedEmailIndex={focusedEmailIndex}
+                    user={user}
+                    listHeight={listHeight}
+                  />
+                )}
+              </>
               )}
             </div>
 
-            {/* Pagination */}
+            {/* Pagination - only show in normal mode, not in search mode */}
+            {!isInSearchMode && (
             <div
               className="flex items-center text-xs justify-end px-3 border-t "
               style={{
@@ -1947,6 +2016,7 @@ export default function Inbox() {
                 ›
               </button>
             </div>
+            )}
 
           </div>
         </div>
