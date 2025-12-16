@@ -21,10 +21,15 @@ export function SearchBar({
 }: SearchBarProps) {
   const [query, setQuery] = useState('');
 
-  const handleKeyPress = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === 'Enter' && query.trim()) {
-      console.log('[SearchBar] 🔍 Searching for:', query.trim());
-      onSearch(query.trim());
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter' && !isLoading) {
+      const q = query.trim();
+      if (q) {
+        console.log('[SearchBar] 🔍 Searching for:', q);
+        onSearch(q);
+      }
+      // prevent form submission if inside a form
+      e.preventDefault();
     }
   };
 
@@ -47,7 +52,7 @@ export function SearchBar({
           type="text"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          onKeyPress={handleKeyPress}
+          onKeyDown={handleKeyDown}
           placeholder={placeholder}
           disabled={isLoading}
           style={{
