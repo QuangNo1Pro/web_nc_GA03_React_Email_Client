@@ -17,10 +17,22 @@ import toast from 'react-hot-toast';
 import EmailDetailModal from './EmailDetailModal';
 import { useNavigate } from 'react-router-dom';
 
-const KanbanBoard: React.FC<{ 
+const SORT_OPTIONS = [
+  { value: 'date-desc', label: 'Date: Newest first' },
+  { value: 'date-asc', label: 'Date: Oldest first' },
+  { value: 'sender-asc', label: 'Sender: A-Z' },
+  { value: 'sender-desc', label: 'Sender: Z-A' },
+];
+
+const KanbanBoard: React.FC<{
   filteredEmails?: any[];
   isSearchMode?: boolean;
 }> = ({ filteredEmails, isSearchMode }) => {
+    // Filter & Sort state
+    const [sortOption, setSortOption] = useState('date-desc');
+    const [filterUnread, setFilterUnread] = useState(false);
+    const [filterHasAttachment, setFilterHasAttachment] = useState(false);
+    const [filterSender, setFilterSender] = useState('');
   const {
     columns,
     emails: allEmails,
@@ -237,27 +249,43 @@ const KanbanBoard: React.FC<{
   
   const activeColumns = columns && columns.length > 0 ? columns : fallbackColumns;
   
-  // Transform search results to have all required Email fields
-  // And merge with existing emails to get their status field
-  const normalizedFilteredEmails = filteredEmails?.map(result => {
-    // Try to find this email in the existing allEmails list to get its status
-    const existingEmail = allEmails.find(e => e.id === result.id);
-    
-    return {
-      id: result.id || result._id || '', // Ensure id field exists
-      sender: result.sender || 'Unknown',
-      subject: result.subject || '(No subject)',
-      snippet: result.snippet || '',
-      timestamp: result.timestamp || Date.now(),
-      summary: result.summary || '',
-      read: result.read ?? false,
-      starred: result.starred ?? false,
-      score: result.score,
-      matchedFields: result.matchedFields,
-      status: existingEmail?.status || 'Inbox', // Get status from existing email or default to Inbox
-      ...result, // Spread rest of fields
-    };
-  }) || [];
+  // Chuẩn hóa và filter/sort email
+  const normalizeAndFilterSortEmails = (emails: any[]) => {
+    let arr = emails.map(result => {
+      const existingEmail = allEmails.find(e => e.id === result.id);
+      return {
+        id: result.id || result._id || '',
+        sender: result.sender || 'Unknown',
+        subject: result.subject || '(No subject)',
+        snippet: result.snippet || '',
+        timestamp: result.timestamp || Date.now(),
+        summary: result.summary || '',
+        read: result.read ?? false,
+        starred: result.starred ?? false,
+        score: result.score,
+        matchedFields: result.matchedFields,
+        status: existingEmail?.status || 'Inbox',
+        attachments: result.attachments || existingEmail?.attachments || [],
+        ...result,
+      };
+    });
+    // Filter
+    if (filterUnread) arr = arr.filter(e => !e.read);
+    if (filterHasAttachment) arr = arr.filter(e => (e.attachments && e.attachments.length > 0));
+    if (filterSender.trim()) arr = arr.filter(e => e.sender?.toLowerCase().includes(filterSender.trim().toLowerCase()));
+    // Sort
+    arr = arr.slice();
+    arr.sort((a, b) => {
+      if (sortOption === 'date-desc') return b.timestamp - a.timestamp;
+      if (sortOption === 'date-asc') return a.timestamp - b.timestamp;
+      if (sortOption === 'sender-asc') return (a.sender || '').localeCompare(b.sender || '');
+      if (sortOption === 'sender-desc') return (b.sender || '').localeCompare(a.sender || '');
+      return 0;
+    });
+    return arr;
+  };
+
+  const normalizedFilteredEmails = filteredEmails ? normalizeAndFilterSortEmails(filteredEmails) : [];
 
   console.log('[KanbanBoard] Search results with status:', {
     totalEmails: normalizedFilteredEmails.length,
@@ -271,15 +299,28 @@ const KanbanBoard: React.FC<{
   
   const displayColumns = isSearchMode && filteredEmails
     ? activeColumns.map(col => {
-        // Distribute search results into columns based on their status field
         const emailsForCol = normalizedFilteredEmails.filter(e => e.status === col.id);
-        console.log(`[KanbanBoard] Column "${col.id}" will have ${emailsForCol.length} emails`);
         return {
           ...col,
           emails: emailsForCol,
         };
       })
-    : activeColumns;
+    : activeColumns.map(col => {
+        // Áp dụng filter/sort cho emails từng cột khi không search
+        let emails = col.emails;
+        if (filterUnread) emails = emails.filter(e => !e.read);
+        if (filterHasAttachment) emails = emails.filter(e => (e.attachments && e.attachments.length > 0));
+        if (filterSender.trim()) emails = emails.filter(e => e.sender?.toLowerCase().includes(filterSender.trim().toLowerCase()));
+        emails = emails.slice();
+        emails.sort((a, b) => {
+          if (sortOption === 'date-desc') return b.timestamp - a.timestamp;
+          if (sortOption === 'date-asc') return a.timestamp - b.timestamp;
+          if (sortOption === 'sender-asc') return (a.sender || '').localeCompare(b.sender || '');
+          if (sortOption === 'sender-desc') return (b.sender || '').localeCompare(a.sender || '');
+          return 0;
+        });
+        return { ...col, emails };
+      });
 
   // If in search mode with filtered emails, organize them into columns by status
   // Search results don't have status field, so distribute them across all columns evenly
@@ -297,6 +338,56 @@ const KanbanBoard: React.FC<{
 
   return (
     <>
+      {/* Filter & Sort Controls - UI đồng bộ, tinh tế hơn */}
+      <div className="flex flex-wrap gap-3 items-center px-6 pt-2 pb-2 bg-[var(--bg-secondary)] border-b border-[var(--border-primary)]">
+        <div className="flex gap-2 items-center bg-[var(--bg-primary)] rounded-lg px-2 py-1 shadow-sm border border-[var(--border-primary)] hover:shadow-md transition">
+          <span className="material-symbols-outlined text-blue-400 text-sm mr-1">sort</span>
+          <label className="font-semibold text-xs mr-1 text-[var(--text-secondary)]">Sort:</label>
+          <select
+            className="border border-blue-100 rounded px-2 py-1 text-xs focus:ring-2 focus:ring-blue-200 outline-none transition bg-[var(--bg-primary)] text-[var(--text-primary)]"
+            value={sortOption}
+            onChange={e => setSortOption(e.target.value)}
+            aria-label="Sort emails"
+          >
+            {SORT_OPTIONS.map(opt => (
+              <option key={opt.value} value={opt.value}>{opt.label}</option>
+            ))}
+          </select>
+        </div>
+        <div className="flex gap-2 items-center bg-[var(--bg-primary)] rounded-lg px-2 py-1 shadow-sm border border-[var(--border-primary)] hover:shadow-md transition">
+          <span className="material-symbols-outlined text-green-400 text-sm mr-1">filter_alt</span>
+          <label className="text-xs flex items-center text-[var(--text-secondary)]">
+            <input type="checkbox" className="mr-1 accent-blue-400" checked={filterUnread} onChange={e => setFilterUnread(e.target.checked)} />
+            <span className="font-medium">Unread</span>
+          </label>
+          <label className="text-xs flex items-center text-[var(--text-secondary)]">
+            <input type="checkbox" className="mr-1 accent-purple-400" checked={filterHasAttachment} onChange={e => setFilterHasAttachment(e.target.checked)} />
+            <span className="font-medium">Attachment</span>
+          </label>
+        </div>
+        <div className="flex gap-2 items-center bg-[var(--bg-primary)] rounded-lg px-2 py-1 shadow-sm border border-[var(--border-primary)] hover:shadow-md transition">
+          <span className="material-symbols-outlined text-orange-400 text-sm mr-1">person_search</span>
+          <label className="font-semibold text-xs mr-1 text-[var(--text-secondary)]">From:</label>
+          <input
+            className="border border-orange-100 rounded px-2 py-1 text-xs focus:ring-2 focus:ring-orange-200 outline-none transition bg-[var(--bg-primary)] text-[var(--text-primary)]"
+            type="text"
+            placeholder="Sender name/email"
+            value={filterSender}
+            onChange={e => setFilterSender(e.target.value)}
+            aria-label="Filter by sender"
+            style={{ minWidth: 100 }}
+          />
+        </div>
+        {(filterUnread || filterHasAttachment || filterSender) && (
+          <button
+            className="ml-2 px-2 py-1 text-xs rounded bg-blue-100 text-blue-700 font-semibold shadow-sm hover:bg-blue-200 transition border border-blue-100 flex items-center gap-1"
+            onClick={() => { setFilterUnread(false); setFilterHasAttachment(false); setFilterSender(''); }}
+          >
+            <span className="material-symbols-outlined text-xs align-middle">close</span>
+            Clear
+          </button>
+        )}
+      </div>
       <KanbanDndProvider
         emails={allEmails}
         onEmailMove={(emailId, newStatus) => {
