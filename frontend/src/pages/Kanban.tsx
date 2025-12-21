@@ -16,6 +16,7 @@ import SnoozedManager from '../components/SnoozedManager';
 import { useGmailSSE } from '../hooks/useGmailSSE';
 import toast from 'react-hot-toast';
 import { searchEmails, semanticSearchEmails, SearchResponse } from '../services/searchService';
+import { SearchBar } from '../components/SearchBar';
 
 const Kanban: React.FC = () => {
   const navigate = useNavigate();
@@ -208,51 +209,17 @@ const Kanban: React.FC = () => {
           </button>
         </div>
 
-        {/* Center: Search Bar */}
+        {/* Center: Search Bar with Auto-Suggestions */}
         <div className="flex-1 max-w-2xl mx-8 hidden md:block">
-          <div
-            className="flex items-center rounded-lg px-4 py-2 transition-all"
-            style={{
-              backgroundColor: 'var(--bg-secondary)',
-              border: '1px solid var(--border-primary)',
+          <SearchBar
+            onSearch={(query) => {
+              setSearchQuery(query);
+              handleSearchSubmit({ key: 'Enter' } as any);
             }}
-            onFocus={(e: any) => {
-              e.currentTarget.style.borderColor = 'var(--accent-primary)';
-            }}
-            onBlur={(e: any) => {
-              e.currentTarget.style.borderColor = 'var(--border-primary)';
-            }}
-          >
-            <span
-              className="material-symbols-outlined mr-3 flex-shrink-0"
-              style={{ color: 'var(--text-tertiary)', fontSize: '20px' }}
-            >
-              search
-            </span>
-            <input
-              type="text"
-              placeholder="Tìm email: subject, sender, hoặc nội dung..."
-              className="outline-none w-full text-sm"
-              style={{
-                backgroundColor: 'transparent',
-                color: 'var(--text-primary)',
-              }}
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              onKeyDown={handleSearchSubmit}
-              disabled={isSearching}
-              aria-label="Search emails with fuzzy matching"
-            />
-            {searchQuery && (
-              <button
-                onClick={handleClearSearch}
-                className="ml-2 text-gray-400 hover:text-gray-600 transition"
-                aria-label="Clear search"
-              >
-                ✕
-              </button>
-            )}
-          </div>
+            isLoading={isSearching}
+            onClear={handleClearSearch}
+            placeholder="Tìm email: subject, sender, hoặc nội dung..."
+          />
         </div>
 
         {/* Right: Profile Menu */}
