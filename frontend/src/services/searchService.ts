@@ -67,3 +67,25 @@ export async function searchEmails(
     throw error;
   }
 }
+
+export async function semanticSearchEmails(
+  query: string,
+  options?: {
+    limit?: number;
+    offset?: number;
+    label?: string;
+  },
+): Promise<SearchResponse> {
+  const body: any = { q: query };
+  if (options?.limit) body.limit = options.limit;
+  if (options?.offset) body.offset = options.offset;
+  if (options?.label) body.label = options.label;
+
+  try {
+    const response = await api.post<SearchResponse>('/api/search/semantic', body);
+    return response.data;
+  } catch (error: any) {
+    console.error('[searchService] semanticSearch error:', error.response?.data || error.message || error);
+    throw error;
+  }
+}

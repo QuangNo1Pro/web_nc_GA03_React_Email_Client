@@ -6,7 +6,7 @@
  */
 
 import React, { useState, useEffect } from 'react';
-import { searchEmails, SearchResponse } from '../services/searchService';
+import { searchEmails, semanticSearchEmails, SearchResponse } from '../services/searchService';
 import SearchBar from './SearchBar';
 import { Email } from '../types/email';
 
@@ -35,7 +35,8 @@ const SearchResults: React.FC<SearchResultsProps> = ({ onClose }) => {
 
     setIsLoading(true);
     try {
-      const data = await searchEmails(searchQuery, { limit, offset: 0 });
+    // Prefer semantic search if available
+    const data = await semanticSearchEmails(searchQuery, { limit, offset: 0 });
       setResults(data);
     } catch (err: any) {
       setError(err.response?.data?.message || 'Failed to search. Please try again.');
@@ -51,7 +52,7 @@ const SearchResults: React.FC<SearchResultsProps> = ({ onClose }) => {
     setIsLoading(true);
     try {
       const nextPage = page + 1;
-      const data = await searchEmails(query, { limit, offset: nextPage * limit });
+      const data = await semanticSearchEmails(query, { limit, offset: nextPage * limit });
       setResults({
         total: data.total,
         results: [...results.results, ...data.results],

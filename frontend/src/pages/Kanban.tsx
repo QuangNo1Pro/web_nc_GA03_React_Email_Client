@@ -15,7 +15,7 @@ import { IoIosArrowDown } from 'react-icons/io';
 import SnoozedManager from '../components/SnoozedManager';
 import { useGmailSSE } from '../hooks/useGmailSSE';
 import toast from 'react-hot-toast';
-import { searchEmails, SearchResponse } from '../services/searchService';
+import { searchEmails, semanticSearchEmails, SearchResponse } from '../services/searchService';
 
 const Kanban: React.FC = () => {
   const navigate = useNavigate();
@@ -103,7 +103,7 @@ const Kanban: React.FC = () => {
     setSearchError(null);
 
     try {
-      const results = await searchEmails(searchQuery.trim(), { limit: 100 });
+      const results = await semanticSearchEmails(searchQuery.trim(), { limit: 100 });
       console.log('[Kanban] 📡 Search API response:', results);
       // Unwrap response: { success, data: { total, results } }
       setSearchResults(results.data);
@@ -268,7 +268,7 @@ const Kanban: React.FC = () => {
             }}
             onClick={() => setShowProfileMenu(!showProfileMenu)}
             aria-label="Profile menu"
-            aria-expanded={showProfileMenu}
+            aria-expanded={showProfileMenu ? 'true' : 'false'}
           >
             <img
               src={user?.picture || 'https://www.gravatar.com/avatar?d=mp&s=200'}

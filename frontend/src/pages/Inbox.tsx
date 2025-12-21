@@ -9,7 +9,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
 import * as ReactWindow from 'react-window';
 import { api } from '../services/api';
-import { searchEmails, SearchResult } from '../services/searchService';
+import { searchEmails, semanticSearchEmails, SearchResult } from '../services/searchService';
 import { SearchBar } from '../components/SearchBar';
 import { SearchResultsList } from '../components/SearchResultsList';
 import {
@@ -467,10 +467,9 @@ export default function Inbox() {
       setIsSearching(true);
       setSearchError(null);
       setIsInSearchMode(true); // Set search mode immediately
-      console.log('[Inbox] 📡 Calling searchEmails API with label:', selectedMailbox);
+      console.log('[Inbox] 📡 Calling semanticSearch API with label:', selectedMailbox);
       
-      const response = await searchEmails(query, {
-        fields: ['subject', 'sender', 'body'],
+      const response = await semanticSearchEmails(query, {
         limit: 50,
         offset: 0,
         label: selectedMailbox, // ✅ Filter by selected mailbox

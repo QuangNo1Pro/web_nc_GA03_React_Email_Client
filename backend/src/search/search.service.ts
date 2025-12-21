@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import Fuse from 'fuse.js';
+import { EmbeddingsService } from '../ai/embeddings.service';
 
 // Email Schema interface
 interface Email {
@@ -12,6 +13,7 @@ interface Email {
   body?: string;
   payload?: any;
   labelIds?: string[];
+  embedding?: number[];
 }
 
 export interface SearchResult {
@@ -30,6 +32,7 @@ export class SearchService {
 
   constructor(
     @InjectModel('Email') private emailModel: Model<Email>,
+    private readonly embeddingsService: EmbeddingsService,
   ) {}
 
   /**
@@ -145,6 +148,73 @@ export class SearchService {
       };
     } catch (error) {
       this.logger.error(`Search error: ${error instanceof Error ? error.message : String(error)}`);
+      throw error;
+    }
+  }
+
+  /**
+   * Semantic search using vector embeddings stored on emails.embedding
+   */
+  async semanticSearch(
+    userId: string,
+    query: string,
+    limit: number = 20,
+    offset: number = 0,
+    label?: string,
+  ): Promise<{ total: number; results: SearchResult[] }> {
+    try {
+      // 1. Generate embedding for query
+      const qEmbedding = await this.embeddingsService.embedText(query);
+
+      // 2. Load emails for user that have embeddings
+      const filter: any = { userId, embedding: { $exists: true, $ne: null } };
+      if (label) {
+        if (label === 'UNREAD') filter.unread = true;
+        else if (label === 'STARRED') filter.starred = true;
+        else if (label !== 'ALL_MAIL') filter.labelIds = { $in: [label] };
+      }
+
+      const emails = await this.emailModel
+        .find(filter)
+        .select('messageId snippet body payload embedding labelIds')
+        .lean()
+        .exec();
+
+      if (!emails || emails.length === 0) return { total: 0, results: [] };
+
+      // 3. Compute cosine similarity
+      const dot = (a: number[], b: number[]) => a.reduce((s, v, i) => s + v * (b[i] || 0), 0);
+      const norm = (a: number[]) => Math.sqrt(a.reduce((s, v) => s + v * v, 0));
+
+      const scored = emails.map((e) => {
+        const emb = e.embedding as number[];
+        const similarity = (emb && qEmbedding) ? (dot(emb, qEmbedding) / (norm(emb) * norm(qEmbedding))) : -1;
+        return { email: e, similarity: Number.isFinite(similarity) ? similarity : -1 };
+      });
+
+      scored.sort((a, b) => b.similarity - a.similarity);
+
+      const total = scored.length;
+      const page = scored.slice(offset, offset + limit);
+
+      const results: SearchResult[] = page.map((s) => {
+        const sender = this.extractEmailInfo(s.email).sender;
+        const subject = this.extractEmailInfo(s.email).subject;
+        // Convert cosine (-1..1) -> score similar to existing format where 0 is perfect
+        const score = 1 - ((s.similarity + 1) / 2); // similarity 1 => score 0, similarity -1 => score 1
+        return {
+          id: s.email.messageId,
+          sender,
+          subject,
+          snippet: s.email.snippet || '',
+          score,
+          matchedFields: ['body', 'subject'],
+        };
+      });
+
+      return { total, results };
+    } catch (error) {
+      this.logger.error(`semanticSearch error: ${error instanceof Error ? error.message : String(error)}`);
       throw error;
     }
   }

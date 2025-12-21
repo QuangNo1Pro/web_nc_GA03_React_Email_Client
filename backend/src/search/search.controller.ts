@@ -6,6 +6,8 @@ import {
   BadRequestException,
   InternalServerErrorException,
   Logger,
+  Post,
+  Body,
 } from '@nestjs/common';
 import { SearchService } from './search.service';
 import { JwtAuthGuard } from '../auth/jwt.guard';
@@ -90,6 +92,34 @@ export class SearchController {
       }
 
       throw new InternalServerErrorException('Lỗi tìm kiếm. Vui lòng thử lại.');
+    }
+  }
+
+  /**
+   * POST /api/search/semantic
+   * Body: { q, limit?, offset?, fields? }
+   */
+  @UseGuards(JwtAuthGuard)
+  @Post('semantic')
+  async semantic(
+    @Body() body: any,
+    @CurrentUser() user: CurrentUserPayload,
+  ) {
+    try {
+      if (!user || !user.sub) throw new BadRequestException('JWT token không hợp lệ');
+      if (!body?.q || body.q.trim().length === 0) throw new BadRequestException('Tham số "q" bắt buộc');
+
+      const limit = Math.min(Number(body.limit) || 20, 100);
+      const offset = Math.max(Number(body.offset) || 0, 0);
+      const label = (body as any).label || undefined;
+
+      const result = await this.searchService.semanticSearch(user.sub, body.q.trim(), limit, offset, label);
+
+      return { success: true, data: result };
+    } catch (error) {
+      this.logger.error(`Semantic search error: ${error instanceof Error ? error.message : String(error)}`);
+      if (error instanceof BadRequestException) throw error;
+      throw new InternalServerErrorException('Lỗi tìm kiếm ngữ nghĩa');
     }
   }
 

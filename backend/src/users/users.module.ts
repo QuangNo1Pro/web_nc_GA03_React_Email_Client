@@ -4,6 +4,7 @@ import { UsersService } from './users.service';
 import { UserSchema } from './schemas/user.schema';
 import { MailboxSchema } from './schemas/mailbox.schema';
 import { EmailSchema } from './schemas/email.schema';
+import { AiModule } from '../ai/ai.module';
 
 @Module({
   imports: [
@@ -12,6 +13,7 @@ import { EmailSchema } from './schemas/email.schema';
       { name: 'Mailbox', schema: MailboxSchema },
       { name: 'Email', schema: EmailSchema },
     ]),
+    AiModule,
   ],
   providers: [UsersService],
   controllers: [],
