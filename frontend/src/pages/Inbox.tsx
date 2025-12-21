@@ -1499,6 +1499,7 @@ export default function Inbox() {
                 isLoading={isSearching}
                 onClear={handleClearSearch}
                 placeholder="Tìm email (typo-tolerant)..."
+                label={selectedMailbox}
               />
             </div>
 

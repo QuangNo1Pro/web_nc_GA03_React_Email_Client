@@ -124,6 +124,55 @@ export class SearchController {
   }
 
   /**
+   * 💡 GET /api/search/suggestions?prefix=<prefix>&label=INBOX&limit=5
+   * 
+   * Get auto-suggestions for type-ahead search
+   * Returns sender names and subject keywords matching the prefix
+   * 
+   * Query params:
+   *   - prefix (required): Text prefix to match (e.g., 'john', 'proj')
+   *   - label (optional): Filter by mailbox (INBOX, SENT, DRAFT, etc.)
+   *   - limit (optional): Max suggestions per category (default: 5, max: 10)
+   */
+  @UseGuards(JwtAuthGuard)
+  @Get('suggestions')
+  async suggestions(
+    @CurrentUser() user: CurrentUserPayload,
+    @Query('prefix') prefix: string,
+    @Query('label') label?: string,
+    @Query('limit') limit?: string | number,
+  ) {
+    try {
+      this.logger.log(`[Suggestions] Request: prefix="${prefix}", label="${label}", user=${user?.sub}`);
+
+      if (!user || !user.sub) {
+        throw new BadRequestException('JWT token không hợp lệ');
+      }
+
+      if (!prefix || prefix.trim().length === 0) {
+        return { success: true, data: { senders: [], subjects: [] } };
+      }
+
+      const suggestionLimit = Math.min(Number(limit) || 5, 10);
+      const suggestions = await this.searchService.getSuggestions(
+        user.sub,
+        prefix.trim(),
+        suggestionLimit,
+        label,
+      );
+
+      return {
+        success: true,
+        data: suggestions,
+      };
+    } catch (error) {
+      this.logger.error(`Suggestions error: ${error instanceof Error ? error.message : String(error)}`);
+      if (error instanceof BadRequestException) throw error;
+      throw new InternalServerErrorException('Lỗi lấy gợi ý');
+    }
+  }
+
+  /**
    * 🧪 TEST ENDPOINT - không cần JWT, để verify API hoạt động
    * GET /api/search/test
    */

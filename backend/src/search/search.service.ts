@@ -237,6 +237,73 @@ export class SearchService {
     return { sender, subject };
   }
 
+  /**
+   * 💡 Get auto-suggestion candidates (senders, subjects) for type-ahead search
+   * Returns unique sender names + subject keywords matching the query prefix
+   */
+  async getSuggestions(
+    userId: string,
+    prefix: string,
+    limit: number = 5,
+    label?: string,
+  ): Promise<{
+    senders: string[];
+    subjects: string[];
+  }> {
+    try {
+      // 1️⃣ Build filter
+      const filter: any = { userId };
+      if (label) {
+        if (label === 'UNREAD') filter.unread = true;
+        else if (label === 'STARRED') filter.starred = true;
+        else if (label !== 'ALL_MAIL') filter.labelIds = { $in: [label] };
+      }
+
+      // 2️⃣ Fetch emails with minimal fields
+      const emails = await this.emailModel
+        .find(filter)
+        .select('payload')
+        .lean()
+        .exec();
+
+      if (!emails || emails.length === 0) {
+        return { senders: [], subjects: [] };
+      }
+
+      // 3️⃣ Extract senders and subjects
+      const senderSet = new Set<string>();
+      const subjectSet = new Set<string>();
+      const prefixLower = prefix.toLowerCase();
+
+      emails.forEach((email) => {
+        const { sender, subject } = this.extractEmailInfo(email);
+
+        // Add sender if it matches prefix
+        if (sender && sender.toLowerCase().includes(prefixLower)) {
+          senderSet.add(sender);
+        }
+
+        // Add subject keywords if they match prefix
+        if (subject && subject.toLowerCase().includes(prefixLower)) {
+          subjectSet.add(subject);
+        }
+      });
+
+      // 4️⃣ Return unique, sorted suggestions
+      return {
+        senders: Array.from(senderSet)
+          .sort()
+          .slice(0, Math.ceil(limit / 2)),
+        subjects: Array.from(subjectSet)
+          .sort()
+          .slice(0, Math.ceil(limit / 2)),
+      };
+    } catch (error) {
+      this.logger.error(`getSuggestions error: ${error instanceof Error ? error.message : String(error)}`);
+      throw error;
+    }
+  }
+
   clearCache(userId: string, label?: string): void {
     if (label) {
       // Clear specific label cache

@@ -17,6 +17,14 @@ export interface SearchResponse {
   };
 }
 
+export interface SuggestionsResponse {
+  success: boolean;
+  data: {
+    senders: string[];
+    subjects: string[];
+  };
+}
+
 /**
  * 🔍 Fuzzy search emails qua API backend
  * Hỗ trợ typo tolerance + partial match + lọc theo thư mục
@@ -87,5 +95,41 @@ export async function semanticSearchEmails(
   } catch (error: any) {
     console.error('[searchService] semanticSearch error:', error.response?.data || error.message || error);
     throw error;
+  }
+}
+
+/**
+ * 💡 Get auto-suggestions for type-ahead search
+ * Returns sender names and subject keywords matching the prefix
+ */
+export async function getSearchSuggestions(
+  prefix: string,
+  options?: {
+    label?: string;
+    limit?: number;
+  },
+): Promise<SuggestionsResponse> {
+  const params = new URLSearchParams();
+  params.append('prefix', prefix);
+
+  if (options?.label) {
+    params.append('label', options.label);
+  }
+
+  if (options?.limit) {
+    params.append('limit', String(options.limit));
+  }
+
+  const url = `/api/search/suggestions?${params.toString()}`;
+  console.log('[searchService] 💡 Suggestions:', url);
+
+  try {
+    const response = await api.get<SuggestionsResponse>(url);
+    console.log('[searchService] ✅ Suggestions response:', response.data);
+    return response.data;
+  } catch (error: any) {
+    console.error('[searchService] 💡 Suggestions error:', error.response?.data || error.message);
+    // Return empty suggestions on error instead of throwing
+    return { success: false, data: { senders: [], subjects: [] } };
   }
 }
