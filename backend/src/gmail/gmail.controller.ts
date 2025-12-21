@@ -9,6 +9,7 @@ import {
   Body,
   Delete,
   Post,
+  Put,
   Res,
   Req,
   Headers,
@@ -313,25 +314,48 @@ export class GmailController {
 }
 
   // ========== FEATURE II: UPDATE EMAIL STATUS (KANBAN DRAG & DROP) ==========
+  /**
+   * Update email status for Kanban workflow
+   * Supports both default statuses and custom column IDs
+   * Optionally accepts label mapping for custom columns
+   */
   @Patch('emails/:messageId/status')
   @UseGuards(AuthGuard('jwt'))
   async updateEmailStatus(
     @Request() req: ExpressRequest,
     @Param('messageId') messageId: string,
     @Body('status') status: string,
+    @Body('labelMapping') labelMapping?: { add: string[], remove: string[] },
   ) {
-    // Validate status
-    const validStatuses = ['Inbox', 'To Do', 'In Progress', 'Done', 'Snoozed'];
-    if (!status || !validStatuses.includes(status)) {
-      throw new BadRequestException(
-        `Invalid status. Must be one of: ${validStatuses.join(', ')}`
-      );
+    // Validate status is provided
+    if (!status) {
+      throw new BadRequestException('Status is required');
+    }
+
+    // For backward compatibility, validate against default statuses
+    // Custom column IDs (col_*) are also allowed
+    const defaultStatuses = ['Inbox', 'To Do', 'In Progress', 'Done', 'Snoozed'];
+    const isDefaultStatus = defaultStatuses.includes(status);
+    const isCustomColumnId = status.startsWith('col_');
+    
+    if (!isDefaultStatus && !isCustomColumnId) {
+      // Check if user has custom Kanban config with this status
+      const userId = (req.user as any).userId;
+      const config = await this.usersService.getKanbanConfig(userId);
+      const hasCustomColumn = config?.some((col: any) => col.id === status || col.title === status);
+      
+      if (!hasCustomColumn) {
+        throw new BadRequestException(
+          `Invalid status: ${status}. Must be a default status or a valid custom column ID.`
+        );
+      }
     }
 
     return this.gmailService.updateEmailStatus(
       (req.user as any).userId,
       messageId,
       status,
+      labelMapping,
     );
   }
 
@@ -548,6 +572,53 @@ export class GmailController {
       (req.user as any).userId,
       messageId,
     );
+  }
+
+  // ========== KANBAN CONFIGURATION ENDPOINTS ==========
+
+  /**
+   * Get user's Kanban column configuration
+   * Returns null if no custom configuration exists (use frontend default)
+   */
+  @Get('kanban/config')
+  @UseGuards(AuthGuard('jwt'))
+  async getKanbanConfig(@Request() req: ExpressRequest) {
+    const userId = (req.user as any).userId;
+    const config = await this.usersService.getKanbanConfig(userId);
+    return { columns: config };
+  }
+
+  /**
+   * Save user's Kanban column configuration
+   * Validates columns array and persists to user document
+   */
+  @Put('kanban/config')
+  @UseGuards(AuthGuard('jwt'))
+  async saveKanbanConfig(
+    @Request() req: ExpressRequest,
+    @Body('columns') columns: any[],
+  ) {
+    const userId = (req.user as any).userId;
+
+    // Validate columns
+    if (!columns || !Array.isArray(columns) || columns.length === 0) {
+      throw new BadRequestException('At least one column is required');
+    }
+
+    // Validate each column has required fields
+    for (const col of columns) {
+      if (!col.id || !col.title || !col.color || col.order === undefined) {
+        throw new BadRequestException('Each column must have id, title, color, and order');
+      }
+      if (!col.gmailLabelMapping) {
+        throw new BadRequestException('Each column must have gmailLabelMapping');
+      }
+    }
+
+    await this.usersService.saveKanbanConfig(userId, columns);
+    console.log(`[Kanban] Saved ${columns.length} columns for user ${userId}`);
+    
+    return { success: true, columns };
   }
 }
 

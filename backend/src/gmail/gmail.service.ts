@@ -382,12 +382,16 @@ export class GmailService {
                 format: 'metadata',
                 metadataHeaders: ['From', 'To', 'Subject', 'Date'],
               });
+              const status = this.inferStatusFromLabels(msg.data.labelIds || []);
+              console.log(`[getEmails] Email ${msg.data.id} labels:`, msg.data.labelIds, '→ status:', status);
               return {
                 id: msg.data.id,
                 snippet: msg.data.snippet,
                 payload: msg.data.payload,
                 labelIds: msg.data.labelIds,
                 internalDate: msg.data.internalDate,
+                // CRITICAL: Infer status for emails fetched from Gmail API (not in DB yet)
+                status: status,
               };
             } catch (err) {
               console.warn(`Failed to get message details for ${message.id}:`, (err as any)?.message || err);
@@ -508,21 +512,46 @@ export class GmailService {
 
   /**
    * Infer Kanban status from Gmail labelIds
+   * Implements strict priority order: Done > In Progress > To Do > Inbox
    * CRITICAL: Must match frontend logic in useEmails.ts
+   * 
+   * Priority Rules:
+   * 1. Done (ARCHIVED)         - Priority 1 (Highest) - Not in INBOX, not system folders
+   * 2. In Progress (IMPORTANT) - Priority 2 - Has IMPORTANT + INBOX
+   * 3. To Do (STARRED)         - Priority 3 - Has STARRED + INBOX
+   * 4. Inbox (INBOX)           - Priority 4 (Lowest) - Default for INBOX emails
+   * 
+   * @param labelIds - Array of Gmail label IDs
+   * @returns EmailStatus string for Kanban column placement
    */
   private inferStatusFromLabels(labelIds: string[]): string {
-    // Priority order: STARRED > IMPORTANT > No INBOX (Done) > Default (Inbox)
-    if (labelIds.includes('STARRED') && labelIds.includes('INBOX')) {
-      return 'To Do';
-    }
-    if (labelIds.includes('IMPORTANT') && labelIds.includes('INBOX')) {
-      return 'In Progress';
-    }
-    // Archived: removed from INBOX (but not in TRASH/SPAM)
-    if (!labelIds.includes('INBOX') && !labelIds.includes('TRASH') && !labelIds.includes('SPAM')) {
+    // PRIORITY 1: Done (Archived) - highest priority
+    // Email is archived if NOT in INBOX and NOT in system folders
+    if (!labelIds.includes('INBOX') && 
+        !labelIds.includes('TRASH') && 
+        !labelIds.includes('SPAM')) {
+      console.log('[inferStatus] Done (archived):', labelIds);
       return 'Done';
     }
-    // Default to Inbox
+    
+    // PRIORITY 2: In Progress (Important emails in INBOX)
+    if (labelIds.includes('IMPORTANT') && labelIds.includes('INBOX')) {
+      console.log('[inferStatus] In Progress (important):', labelIds);
+      return 'In Progress';
+    }
+    
+    // PRIORITY 3: To Do (Starred emails in INBOX)
+    if (labelIds.includes('STARRED') && labelIds.includes('INBOX')) {
+      console.log('[inferStatus] To Do (starred):', labelIds);
+      return 'To Do';
+    }
+    
+    // PRIORITY 4: Inbox (Default - any email with INBOX label)
+    if (labelIds.includes('INBOX')) {
+      return 'Inbox';
+    }
+    
+    // FALLBACK: Default to Inbox (should rarely reach here)
     return 'Inbox';
   }
 

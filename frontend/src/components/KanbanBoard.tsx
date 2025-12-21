@@ -5,6 +5,7 @@
  * FEATURE II: Integrated with drag & drop functionality
  * FEATURE III: Integrated with snooze/unsnooze operations
  * FEATURE: Email detail modal integration
+ * FEATURE: Dynamic Kanban configuration
  */
 
 import React, { useCallback, useState } from 'react';
@@ -28,6 +29,8 @@ const KanbanBoard: React.FC<{
   filteredEmails?: any[];
   isSearchMode?: boolean;
 }> = ({ filteredEmails, isSearchMode }) => {
+  // Settings modal state
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
     // Filter & Sort state
     const [sortOption, setSortOption] = useState('date-desc');
     const [filterUnread, setFilterUnread] = useState(false);
@@ -387,7 +390,18 @@ const KanbanBoard: React.FC<{
             Clear
           </button>
         )}
+        
+        {/* Settings Button */}
+        <button
+          onClick={() => setIsSettingsOpen(true)}
+          className="ml-auto px-3 py-1.5 text-xs rounded-lg bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 font-medium shadow-sm hover:bg-gray-200 dark:hover:bg-gray-600 transition border border-gray-200 dark:border-gray-600 flex items-center gap-1.5"
+          title="Kanban Settings"
+        >
+          <span className="material-symbols-outlined text-sm">settings</span>
+          Settings
+        </button>
       </div>
+      
       <KanbanDndProvider
         emails={allEmails}
         onEmailMove={(emailId, newStatus) => {
