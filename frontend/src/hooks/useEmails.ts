@@ -12,16 +12,55 @@ import { Email, EmailStatus, KanbanColumn } from '../types/email';
 import { parseEmail } from '../utils/emailUtils';
 
 /**
- * Fetch all emails from backend
- * Fetches from INBOX as the primary source for Kanban view
+ * Fetch all emails from backend for Kanban view
+ * Fetch from multiple labels to ensure all columns have data, including archived emails
  */
 const fetchAllEmails = async (): Promise<Email[]> => {
   try {
-    // Fetch from INBOX as primary source for Kanban board
-    const { data } = await api.get('/gmail/mailboxes/INBOX/emails');
-    return data.messages?.map(parseEmail) || [];
+    // Fetch from multiple sources in parallel
+    // SENT contains archived emails (Done column)
+    const [inboxRes, starredRes, importantRes, sentRes] = await Promise.allSettled([
+      api.get('/gmail/mailboxes/INBOX/emails'),
+      api.get('/gmail/mailboxes/STARRED/emails'),
+      api.get('/gmail/mailboxes/IMPORTANT/emails'),
+      api.get('/gmail/mailboxes/SENT/emails'), // Archived emails often in SENT
+    ]);
+    
+    const inboxEmails = inboxRes.status === 'fulfilled' ? (inboxRes.value.data.messages || []) : [];
+    const starredEmails = starredRes.status === 'fulfilled' ? (starredRes.value.data.messages || []) : [];
+    const importantEmails = importantRes.status === 'fulfilled' ? (importantRes.value.data.messages || []) : [];
+    const sentEmails = sentRes.status === 'fulfilled' ? (sentRes.value.data.messages || []) : [];
+    
+    console.log('[fetchAllEmails] INBOX:', inboxEmails.length, '| STARRED:', starredEmails.length, 
+                '| IMPORTANT:', importantEmails.length, '| SENT:', sentEmails.length);
+    
+    // Merge and deduplicate by email ID
+    const allEmails = [...inboxEmails, ...starredEmails, ...importantEmails, ...sentEmails];
+    const uniqueEmails = Array.from(
+      new Map(allEmails.map(e => [e.id, e])).values()
+    );
+    
+    console.log('[fetchAllEmails] Total unique emails:', uniqueEmails.length);
+    
+    // Debug: Count emails by inferred status
+    const statusCounts = { 'Inbox': 0, 'To Do': 0, 'In Progress': 0, 'Done': 0 };
+    uniqueEmails.forEach((e: any) => {
+      const labels = e.labelIds || [];
+      if (labels.includes('IMPORTANT') && labels.includes('INBOX')) {
+        statusCounts['In Progress']++;
+      } else if (labels.includes('STARRED') && labels.includes('INBOX')) {
+        statusCounts['To Do']++;
+      } else if (!labels.includes('INBOX') && !labels.includes('TRASH') && !labels.includes('SPAM') && !labels.includes('DRAFT')) {
+        statusCounts['Done']++;
+      } else {
+        statusCounts['Inbox']++;
+      }
+    });
+    console.log('[fetchAllEmails] Status counts:', statusCounts);
+    
+    return uniqueEmails.map(parseEmail);
   } catch (error: any) {
-    console.error('Failed to fetch emails:', error);
+    console.error('[fetchAllEmails] Error:', error);
     throw error;
   }
 };
@@ -50,23 +89,40 @@ const getLabelsForStatus = (status: EmailStatus): string[] => {
 
 /**
  * Map Gmail labels to Kanban status
- * Backend may not have explicit "status" field, so we infer from labelIds
+ * Implements strict priority order: Done > In Progress > To Do > Inbox
+ * CRITICAL: Must match backend/src/gmail/gmail.service.ts::inferStatusFromLabels
+ * 
+ * This ensures emails with multiple labels are deterministically placed
+ * in exactly ONE column based on highest priority label.
  */
 const inferEmailStatus = (email: Email): EmailStatus => {
-  // If backend provides explicit status field, use it
-  if (email.status) {
-    return email.status;
-  }
-
-  // Otherwise, infer from labelIds
+  // ALWAYS infer from labelIds (don't trust backend status field)
   const labels = email.labelIds || [];
   
-  // Priority order: STARRED > IMPORTANT > No INBOX (Done) > Default (Inbox)
-  if (labels.includes('STARRED') && labels.includes('INBOX')) return 'To Do';
-  if (labels.includes('IMPORTANT') && labels.includes('INBOX')) return 'In Progress';
-  if (!labels.includes('INBOX') && !labels.includes('TRASH') && !labels.includes('SPAM')) return 'Done'; // Archived
+  // PRIORITY 1: In Progress (Important emails in INBOX)
+  if (labels.includes('IMPORTANT') && labels.includes('INBOX')) {
+    console.log(`[inferEmailStatus] Email ${email.id?.substring(0, 8)} → In Progress (IMPORTANT):`, labels);
+    return 'In Progress';
+  }
   
-  // Default to Inbox for all other emails
+  // PRIORITY 2: To Do (Starred emails in INBOX)
+  if (labels.includes('STARRED') && labels.includes('INBOX')) {
+    console.log(`[inferEmailStatus] Email ${email.id?.substring(0, 8)} → To Do (STARRED):`, labels);
+    return 'To Do';
+  }
+  
+  // PRIORITY 3: Done (Archived - not in INBOX, not in TRASH/SPAM)
+  // NOTE: These emails won't appear unless we fetch from non-INBOX sources
+  if (!labels.includes('INBOX') && 
+      !labels.includes('TRASH') && 
+      !labels.includes('SPAM') &&
+      !labels.includes('DRAFT')) {
+    console.log(`[inferEmailStatus] Email ${email.id?.substring(0, 8)} → Done (archived):`, labels);
+    return 'Done';
+  }
+  
+  // PRIORITY 4: Inbox (Default - any email with INBOX label)
+  console.log(`[inferEmailStatus] Email ${email.id?.substring(0, 8)} → Inbox (default):`, labels);
   return 'Inbox';
 };
 
