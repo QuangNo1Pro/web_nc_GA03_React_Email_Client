@@ -3,8 +3,21 @@ export const saveDraft = async (payload: any) => {
 };
 
 // ========== FEATURE II: UPDATE EMAIL STATUS FOR KANBAN WORKFLOW ==========
-export const updateEmailStatus = async (emailId: string, status: string) => {
-  const { data } = await api.patch(`/gmail/emails/${emailId}/status`, { status });
+/**
+ * Update email status for Kanban drag-drop
+ * @param emailId - Email message ID
+ * @param status - New status (column ID or title)
+ * @param labelMapping - Optional label mapping for custom columns { add: string[], remove: string[] }
+ */
+export const updateEmailStatus = async (
+  emailId: string,
+  status: string,
+  labelMapping?: { add: string[], remove: string[] }
+) => {
+  const { data } = await api.patch(`/gmail/emails/${emailId}/status`, {
+    status,
+    labelMapping,
+  });
   return data;
 };
 
