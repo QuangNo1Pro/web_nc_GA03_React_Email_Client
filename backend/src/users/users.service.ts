@@ -500,5 +500,28 @@ export class UsersService {
       .findByIdAndUpdate(userId, { $set: updateData }, { new: true })
       .exec();
   }
+
+  // ========== KANBAN CONFIGURATION ==========
+  
+  /**
+   * Get user's Kanban column configuration
+   */
+  async getKanbanConfig(userId: string) {
+    const user = await this.userModel.findById(userId).exec();
+    return user?.kanbanConfig || null;
+  }
+
+  /**
+   * Save user's Kanban column configuration
+   */
+  async saveKanbanConfig(userId: string, columns: any[]) {
+    return this.userModel
+      .findByIdAndUpdate(
+        userId,
+        { $set: { kanbanConfig: columns } },
+        { new: true }
+      )
+      .exec();
+  }
 }
 

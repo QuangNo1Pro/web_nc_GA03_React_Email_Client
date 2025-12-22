@@ -9,6 +9,7 @@ import {
   Body,
   Delete,
   Post,
+  Put,
   Res,
   Req,
   Headers,
@@ -78,7 +79,7 @@ export class GmailController {
       clearInterval(heartbeatInterval);
       this.sseService.removeConnection(userId, res);
       console.log(`[SSE] Client disconnected: ${userId}`);
-      
+
       // Stop polling if user has no more SSE connections
       if (this.sseService.getConnectionCount(userId) === 0) {
         this.gmailPollingService.stopPollingForUser(userId);
@@ -136,7 +137,7 @@ export class GmailController {
     const userId = (req.user as any).userId;
     const activeCount = this.gmailPollingService.getActivePollingCount();
     const sseCount = this.sseService.getConnectionCount(userId);
-    
+
     return {
       userId,
       activePollingUsers: activeCount,
@@ -163,14 +164,14 @@ export class GmailController {
   async getMailboxes(@Request() req: ExpressRequest) {
     const user = await this.usersService.findById((req.user as any).userId);
     const provider = user ? (user as any).provider : null;
-    
+
     // IMAP check commented out
     // If IMAP user, return empty to prevent errors
     // if (provider === 'imap') {
     //   console.log('[Gmail Controller] IMAP user accessing Gmail endpoint, returning empty');
     //   return [];
     // }
-    
+
     return this.gmailService.getMailboxes((req.user as any).userId);
   }
 
@@ -183,14 +184,14 @@ export class GmailController {
   ) {
     const user = await this.usersService.findById((req.user as any).userId);
     const provider = user ? (user as any).provider : null;
-    
+
     // IMAP check commented out
     // If IMAP user, return empty to prevent errors
     // if (provider === 'imap') {
     //   console.log('[Gmail Controller] IMAP user accessing Gmail endpoint, returning empty');
     //   return { messages: [], nextPageToken: undefined };
     // }
-    
+
     return this.gmailService.getEmails(
       (req.user as any).userId,
       labelId,
@@ -208,16 +209,16 @@ export class GmailController {
   async getSnoozedEmails(@Req() req: ExpressRequest) {
     console.log('[Controller] 📥 GET /gmail/emails/snoozed - Request received');
     console.log('[Controller] req.user:', req.user);
-    
+
     const userId = (req.user as any)?.userId;
-    
+
     if (!userId) {
       console.error('[Controller] ❌ userId is undefined! req.user:', req.user);
       throw new UnauthorizedException('User ID not found in token. Please log in again.');
     }
-    
+
     console.log('[Controller] ✅ Extracted userId:', userId);
-    
+
     try {
       const result = await this.gmailService.getSnoozedEmails(userId);
       console.log('[Controller] ✅ Returning', result.length, 'snoozed emails');
@@ -303,51 +304,60 @@ export class GmailController {
   @Patch('emails/:messageId/spam')
   @UseGuards(AuthGuard('jwt'))
   moveToSpam(
-  @Request() req: ExpressRequest,
-  @Param('messageId') messageId: string,
-) {
-  return this.gmailService.moveEmailToSpam(
-    (req.user as any).userId,
-    messageId,
-  );
-}
+    @Request() req: ExpressRequest,
+    @Param('messageId') messageId: string,
+  ) {
+    return this.gmailService.moveEmailToSpam(
+      (req.user as any).userId,
+      messageId,
+    );
+  }
 
   // ========== FEATURE II: UPDATE EMAIL STATUS (KANBAN DRAG & DROP) ==========
+  /**
+   * Update email status for Kanban workflow
+   * Supports both default statuses and custom column IDs
+   * Optionally accepts label mapping for custom columns
+   */
   @Patch('emails/:messageId/status')
   @UseGuards(AuthGuard('jwt'))
   async updateEmailStatus(
     @Request() req: ExpressRequest,
     @Param('messageId') messageId: string,
     @Body('status') status: string,
+    @Body('labelMapping') labelMapping?: { add: string[], remove: string[] },
   ) {
-    // Validate status
-    const validStatuses = ['Inbox', 'To Do', 'In Progress', 'Done', 'Snoozed'];
-    if (!status || !validStatuses.includes(status)) {
-      throw new BadRequestException(
-        `Invalid status. Must be one of: ${validStatuses.join(', ')}`
-      );
+    // Validate status is provided
+    if (!status) {
+      throw new BadRequestException('Status is required');
     }
+
+    // Accept any status - frontend provides labelMapping for custom columns
+    // Default statuses work with built-in mapping in service
+    // Custom columns work with provided labelMapping
+    console.log(`[Controller] updateEmailStatus: status=${status}, labelMapping=`, labelMapping);
 
     return this.gmailService.updateEmailStatus(
       (req.user as any).userId,
       messageId,
       status,
+      labelMapping,
     );
   }
 
   @Post("emails/:id/move")
   @UseGuards(AuthGuard('jwt'))
   async moveEmail(
-  @Request() req: ExpressRequest,
-  @Param("id") id: string,
-  @Body() body: { label: string }
-) {
-  return this.gmailService.moveEmail(
-    (req.user as any).userId,
-    id,
-    body.label
-  );
-}
+    @Request() req: ExpressRequest,
+    @Param("id") id: string,
+    @Body() body: { label: string }
+  ) {
+    return this.gmailService.moveEmail(
+      (req.user as any).userId,
+      id,
+      body.label
+    );
+  }
 
   // FEATURE IV: AI Content Summarization
   @Post('emails/:id/summary')
@@ -365,28 +375,28 @@ export class GmailController {
   @Post('draft')
   @UseGuards(AuthGuard('jwt'))
   async saveDraft(
-  @Request() req: ExpressRequest,
-  @Body() body: {
-    to: string;
-    cc?: string;
-    bcc?: string;
-    subject: string;
-    body: string;
-    attachments?: { filename: string; mimeType: string; base64Content: string }[];
-    draftId?: string; // Thêm draftId để update draft
+    @Request() req: ExpressRequest,
+    @Body() body: {
+      to: string;
+      cc?: string;
+      bcc?: string;
+      subject: string;
+      body: string;
+      attachments?: { filename: string; mimeType: string; base64Content: string }[];
+      draftId?: string; // Thêm draftId để update draft
+    }
+  ) {
+    return this.gmailService.saveDraft(
+      (req.user as any).userId,
+      body.to,
+      body.subject,
+      body.body,
+      body.cc,
+      body.bcc,
+      body.attachments,
+      body.draftId, // Pass draftId
+    );
   }
-) {
-  return this.gmailService.saveDraft(
-    (req.user as any).userId,
-    body.to,
-    body.subject,
-    body.body,
-    body.cc,
-    body.bcc,
-    body.attachments,
-    body.draftId, // Pass draftId
-  );
-}
 
   @Post('send')
   @UseGuards(AuthGuard('jwt'))
@@ -431,7 +441,7 @@ export class GmailController {
   }
 
   // ========== FEATURE III: SNOOZE / DEFERRAL MECHANISM ==========
-  
+
   /**
    * Snooze an email until a specific time
    * POST /gmail/emails/:messageId/snooze
@@ -460,7 +470,7 @@ export class GmailController {
     const isSimulate = simulate === true || simulateQuery === 'true';
     if (isSimulate) {
       console.log(`[Snooze] Simulation mode: scheduling auto-unsnooze in 30 seconds for ${messageId}`);
-      
+
       // Schedule in-memory timeout for demo (30 seconds)
       setTimeout(async () => {
         try {
@@ -517,7 +527,7 @@ export class GmailController {
 
     try {
       const updated = await this.usersService.updateSnoozeTime(userId, messageId, newTime);
-      
+
       if (!updated) {
         throw new BadRequestException('Email not found or update failed');
       }
@@ -548,6 +558,53 @@ export class GmailController {
       (req.user as any).userId,
       messageId,
     );
+  }
+
+  // ========== KANBAN CONFIGURATION ENDPOINTS ==========
+
+  /**
+   * Get user's Kanban column configuration
+   * Returns null if no custom configuration exists (use frontend default)
+   */
+  @Get('kanban/config')
+  @UseGuards(AuthGuard('jwt'))
+  async getKanbanConfig(@Request() req: ExpressRequest) {
+    const userId = (req.user as any).userId;
+    const config = await this.usersService.getKanbanConfig(userId);
+    return { columns: config };
+  }
+
+  /**
+   * Save user's Kanban column configuration
+   * Validates columns array and persists to user document
+   */
+  @Put('kanban/config')
+  @UseGuards(AuthGuard('jwt'))
+  async saveKanbanConfig(
+    @Request() req: ExpressRequest,
+    @Body('columns') columns: any[],
+  ) {
+    const userId = (req.user as any).userId;
+
+    // Validate columns
+    if (!columns || !Array.isArray(columns) || columns.length === 0) {
+      throw new BadRequestException('At least one column is required');
+    }
+
+    // Validate each column has required fields
+    for (const col of columns) {
+      if (!col.id || !col.title || !col.color || col.order === undefined) {
+        throw new BadRequestException('Each column must have id, title, color, and order');
+      }
+      if (!col.gmailLabelMapping) {
+        throw new BadRequestException('Each column must have gmailLabelMapping');
+      }
+    }
+
+    await this.usersService.saveKanbanConfig(userId, columns);
+    console.log(`[Kanban] Saved ${columns.length} columns for user ${userId}`);
+
+    return { success: true, columns };
   }
 }
 

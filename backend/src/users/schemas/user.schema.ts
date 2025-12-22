@@ -1,5 +1,21 @@
 import { Schema, Document } from 'mongoose';
 
+// ========== KANBAN CONFIGURATION TYPES ==========
+export interface GmailLabelMapping {
+  matchLabels: string[];
+  addLabels: string[];
+  removeLabels: string[];
+}
+
+export interface KanbanColumnConfig {
+  id: string;
+  title: string;
+  color: string;
+  order: number;
+  gmailLabelMapping: GmailLabelMapping;
+  isDefault?: boolean;
+}
+
 export interface UserDocument extends Document {
   email: string;
   password?: string;
@@ -23,6 +39,8 @@ export interface UserDocument extends Document {
     port: number;
     tls?: boolean;
   };
+  // ========== KANBAN CONFIGURATION ==========
+  kanbanConfig?: KanbanColumnConfig[];
   createdAt: Date;
 }
 
@@ -73,6 +91,23 @@ export const UserSchema = new Schema(
       host: { type: String, required: false },
       port: { type: Number, required: false },
       tls: { type: Boolean, default: true },
+    },
+
+    // ========== KANBAN CONFIGURATION ==========
+    kanbanConfig: {
+      type: [{
+        id: { type: String, required: true },
+        title: { type: String, required: true },
+        color: { type: String, required: true },
+        order: { type: Number, required: true },
+        gmailLabelMapping: {
+          matchLabels: [{ type: String }],
+          addLabels: [{ type: String }],
+          removeLabels: [{ type: String }],
+        },
+        isDefault: { type: Boolean, default: false },
+      }],
+      default: undefined,
     },
 
     createdAt: { type: Date, default: Date.now },

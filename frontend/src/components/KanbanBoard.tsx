@@ -4,14 +4,17 @@
  * Responsive and scrollable for multiple columns
  * FEATURE II: Integrated with drag & drop functionality
  * FEATURE III: Integrated with snooze/unsnooze operations
+ * FEATURE III: Dynamic Kanban column configuration
  * FEATURE: Email detail modal integration
  */
 
 import React, { useCallback, useState } from 'react';
 import { useEmails } from '../hooks/useEmails';
+import { useKanbanColumns } from '../hooks/useKanbanColumns';
 import { KanbanDndProvider } from '../contexts/KanbanDndContext';
 import { EmailStatus } from '../types/email';
 import KanbanColumn from './KanbanColumn';
+import KanbanSettingsModal from './KanbanSettingsModal';
 import { snoozeEmail as snoozeEmailAPI, fetchEmail } from '../services/emailService';
 import toast from 'react-hot-toast';
 import EmailDetailModal from './EmailDetailModal';
@@ -28,11 +31,27 @@ const KanbanBoard: React.FC<{
   filteredEmails?: any[];
   isSearchMode?: boolean;
 }> = ({ filteredEmails, isSearchMode }) => {
-    // Filter & Sort state
-    const [sortOption, setSortOption] = useState('date-desc');
-    const [filterUnread, setFilterUnread] = useState(false);
-    const [filterHasAttachment, setFilterHasAttachment] = useState(false);
-    const [filterSender, setFilterSender] = useState('');
+  // Settings modal state
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+
+  // Dynamic column configuration hook
+  const {
+    columns: columnConfig,
+    addColumn,
+    updateColumn,
+    deleteColumn,
+    reorderColumns,
+    resetToDefaults,
+    isLoading: isColumnsLoading,
+  } = useKanbanColumns();
+
+  // Filter & Sort state
+  const [sortOption, setSortOption] = useState('date-desc');
+  const [filterUnread, setFilterUnread] = useState(false);
+  const [filterHasAttachment, setFilterHasAttachment] = useState(false);
+  const [filterSender, setFilterSender] = useState('');
+
+  // Pass dynamic column config to useEmails hook
   const {
     columns,
     emails: allEmails,
@@ -44,7 +63,7 @@ const KanbanBoard: React.FC<{
     snoozeEmailOptimistic,
     revertSnooze,
     updateEmailSnoozeFromServer,
-  } = useEmails();
+  } = useEmails({ columnConfig });
 
   const navigate = useNavigate();
 
@@ -54,7 +73,7 @@ const KanbanBoard: React.FC<{
   const [isLoadingDetail, setIsLoadingDetail] = useState(false);
   const [starredState, setStarredState] = useState<{ [id: string]: boolean }>({});
   const [downloadingAttachments, setDownloadingAttachments] = useState<Set<string>>(new Set());
-  
+
   // Hover states for email detail actions
   const [isReplyHoveredDetail, setIsReplyHoveredDetail] = useState(false);
   const [isReplyAllHoveredDetail, setIsReplyAllHoveredDetail] = useState(false);
@@ -67,14 +86,14 @@ const KanbanBoard: React.FC<{
   const handleOpenEmail = useCallback(async (emailId: string) => {
     setSelectedEmailId(emailId);
     setIsLoadingDetail(true);
-    
+
     try {
       // Fetch full email detail from backend
       const emailDetail = await fetchEmail(emailId);
-      
+
       // Find the email from list for metadata
       const listEmail = allEmails.find(e => e.id === emailId);
-      
+
       // Construct complete email object (similar to Inbox.tsx)
       const completeEmail = {
         ...(listEmail || {}),
@@ -92,7 +111,7 @@ const KanbanBoard: React.FC<{
         timestamp: listEmail?.timestamp || emailDetail?.headers?.date,
         read: listEmail?.read ?? emailDetail?.read,
       };
-      
+
       setSelectedEmailDetail(completeEmail);
     } catch (error) {
       console.error('Failed to load email detail:', error);
@@ -170,14 +189,14 @@ const KanbanBoard: React.FC<{
 
       // Format snooze time for toast
       const snoozeDate = new Date(snoozedUntil);
-      const timeStr = simulate 
+      const timeStr = simulate
         ? 'in 30 seconds (demo)'
         : snoozeDate.toLocaleString('en-US', {
-            month: 'short',
-            day: 'numeric',
-            hour: 'numeric',
-            minute: '2-digit',
-          });
+          month: 'short',
+          day: 'numeric',
+          hour: 'numeric',
+          minute: '2-digit',
+        });
 
       toast.success(`Snoozed until ${timeStr}`, {
         duration: 3000,
@@ -199,7 +218,7 @@ const KanbanBoard: React.FC<{
   }, [allEmails, snoozeEmailOptimistic, updateEmailSnoozeFromServer, revertSnooze]);
 
   // Loading state
-  if (isLoading) {
+  if (isLoading || isColumnsLoading) {
     return (
       <div className="flex items-center justify-center h-full bg-gray-50">
         <div className="flex flex-col items-center gap-4">
@@ -238,7 +257,7 @@ const KanbanBoard: React.FC<{
   // Main board: chia đều các cột, không thừa khoảng trống
   // FEATURE II: Wrapped with DnD provider for drag & drop
   // FEATURE III: Pass handleSnooze callback to columns
-  
+
   // Fallback columns in case useEmails hook hasn't loaded yet
   const fallbackColumns = [
     { id: 'Inbox' as const, title: 'Inbox', color: 'border-l-blue-500', emails: [] },
@@ -246,9 +265,9 @@ const KanbanBoard: React.FC<{
     { id: 'In Progress' as const, title: 'In Progress', color: 'border-l-purple-500', emails: [] },
     { id: 'Done' as const, title: 'Done', color: 'border-l-green-500', emails: [] },
   ];
-  
+
   const activeColumns = columns && columns.length > 0 ? columns : fallbackColumns;
-  
+
   // Chuẩn hóa và filter/sort email
   const normalizeAndFilterSortEmails = (emails: any[]) => {
     let arr = emails.map(result => {
@@ -296,37 +315,37 @@ const KanbanBoard: React.FC<{
       Done: normalizedFilteredEmails.filter(e => e.status === 'Done').length,
     }
   });
-  
+
   const displayColumns = isSearchMode && filteredEmails
     ? activeColumns.map(col => {
-        const emailsForCol = normalizedFilteredEmails.filter(e => e.status === col.id);
-        return {
-          ...col,
-          emails: emailsForCol,
-        };
-      })
+      const emailsForCol = normalizedFilteredEmails.filter(e => e.status === col.id);
+      return {
+        ...col,
+        emails: emailsForCol,
+      };
+    })
     : activeColumns.map(col => {
-        // Áp dụng filter/sort cho emails từng cột khi không search
-        let emails = col.emails;
-        if (filterUnread) emails = emails.filter(e => !e.read);
-        if (filterHasAttachment) emails = emails.filter(e => (e.attachments && e.attachments.length > 0));
-        if (filterSender.trim()) emails = emails.filter(e => e.sender?.toLowerCase().includes(filterSender.trim().toLowerCase()));
-        emails = emails.slice();
-        emails.sort((a, b) => {
-          if (sortOption === 'date-desc') return b.timestamp - a.timestamp;
-          if (sortOption === 'date-asc') return a.timestamp - b.timestamp;
-          if (sortOption === 'sender-asc') return (a.sender || '').localeCompare(b.sender || '');
-          if (sortOption === 'sender-desc') return (b.sender || '').localeCompare(a.sender || '');
-          return 0;
-        });
-        return { ...col, emails };
+      // Áp dụng filter/sort cho emails từng cột khi không search
+      let emails = col.emails;
+      if (filterUnread) emails = emails.filter(e => !e.read);
+      if (filterHasAttachment) emails = emails.filter(e => (e.attachments && e.attachments.length > 0));
+      if (filterSender.trim()) emails = emails.filter(e => e.sender?.toLowerCase().includes(filterSender.trim().toLowerCase()));
+      emails = emails.slice();
+      emails.sort((a, b) => {
+        if (sortOption === 'date-desc') return b.timestamp - a.timestamp;
+        if (sortOption === 'date-asc') return a.timestamp - b.timestamp;
+        if (sortOption === 'sender-asc') return (a.sender || '').localeCompare(b.sender || '');
+        if (sortOption === 'sender-desc') return (b.sender || '').localeCompare(a.sender || '');
+        return 0;
       });
+      return { ...col, emails };
+    });
 
   // If in search mode with filtered emails, organize them into columns by status
   // Search results don't have status field, so distribute them across all columns evenly
   // or show all in INBOX by default
-  console.log('[KanbanBoard] Render:', { 
-    isSearchMode, 
+  console.log('[KanbanBoard] Render:', {
+    isSearchMode,
     filteredEmailsCount: filteredEmails?.length,
     columnsCount: columns?.length,
     displayColumnsCount: displayColumns.length,
@@ -387,9 +406,21 @@ const KanbanBoard: React.FC<{
             Clear
           </button>
         )}
+
+        {/* Settings Button */}
+        <button
+          onClick={() => setIsSettingsOpen(true)}
+          className="ml-auto px-3 py-1.5 text-xs rounded-lg bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 font-medium shadow-sm hover:bg-gray-200 dark:hover:bg-gray-600 transition border border-gray-200 dark:border-gray-600 flex items-center gap-1.5"
+          title="Kanban Settings"
+        >
+          <span className="material-symbols-outlined text-sm">settings</span>
+          Settings
+        </button>
       </div>
+
       <KanbanDndProvider
         emails={allEmails}
+        columns={columns}
         onEmailMove={(emailId, newStatus) => {
           optimisticUpdateEmailStatus(emailId, newStatus);
         }}
@@ -413,8 +444,8 @@ const KanbanBoard: React.FC<{
           aria-label="Kanban board"
         >
           {displayColumns.map((column) => (
-            <KanbanColumn 
-              key={column.id} 
+            <KanbanColumn
+              key={column.id}
               column={column}
               onSnooze={handleSnooze}
               onOpenEmail={handleOpenEmail}
@@ -452,6 +483,18 @@ const KanbanBoard: React.FC<{
           setIsDeleteHoveredDetail={setIsDeleteHoveredDetail}
         />
       )}
+
+      {/* Kanban Settings Modal */}
+      <KanbanSettingsModal
+        isOpen={isSettingsOpen}
+        onClose={() => setIsSettingsOpen(false)}
+        columns={columnConfig}
+        onAddColumn={addColumn}
+        onUpdateColumn={updateColumn}
+        onDeleteColumn={deleteColumn}
+        onReorderColumns={reorderColumns}
+        onResetToDefaults={resetToDefaults}
+      />
     </>
   );
 };
