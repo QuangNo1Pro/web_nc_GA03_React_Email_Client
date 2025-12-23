@@ -23,7 +23,7 @@ export class EmbeddingsProcessorService {
   constructor(
     @InjectModel('Email') private emailModel: Model<any>,
     private readonly embeddingsService: EmbeddingsService,
-  ) {}
+  ) { }
 
   /**
    * 🎯 Generate embeddings for new/updated emails (non-blocking)
@@ -44,9 +44,18 @@ export class EmbeddingsProcessorService {
           .lean()
           .exec();
       } else {
-        // Find emails without embeddings (limit to 50 per run to avoid overload)
+        // Find emails without embeddings OR with empty embedding arrays
+        // (limit to 50 per run to avoid overload)
         emailsToProcess = await this.emailModel
-          .find({ userId, embedding: { $exists: false } })
+          .find({
+            userId,
+            $or: [
+              { embedding: { $exists: false } },
+              { embedding: null },
+              { embedding: [] },
+              { embedding: { $size: 0 } }
+            ]
+          })
           .select('_id messageId payload snippet')
           .limit(50)
           .lean()
@@ -64,7 +73,7 @@ export class EmbeddingsProcessorService {
       const batchSize = 5;
       for (let i = 0; i < emailsToProcess.length; i += batchSize) {
         const batch = emailsToProcess.slice(i, i + batchSize);
-        
+
         await Promise.all(
           batch.map(email => this.generateEmbeddingForEmail(email))
         );
@@ -96,17 +105,27 @@ export class EmbeddingsProcessorService {
     this.processingQueue.add(emailId);
 
     try {
-      // Extract subject and body
+      // Extract subject
       const subject = this.extractSubject(email.payload) || '';
-      const body = email.snippet || '';
 
-      // Combine subject + snippet for embedding
-      const textToEmbed = `${subject} ${body}`.trim();
+      // Extract full body (not just snippet) for better semantic understanding
+      const fullBody = this.extractEmailBody(email.payload);
+
+      // Use full body if available, fallback to snippet
+      const body = fullBody || email.snippet || '';
+
+      // Limit to 2000 chars to avoid token limits (Gemini has 2048 token limit)
+      const truncatedBody = body.substring(0, 2000);
+
+      // Combine subject + body for embedding
+      const textToEmbed = `${subject} ${truncatedBody}`.trim();
 
       if (!textToEmbed || textToEmbed.length < 5) {
         this.logger.warn(`[EmbeddingsProcessor] Skipping email ${emailId}: insufficient text`);
         return;
       }
+
+      this.logger.debug(`[EmbeddingsProcessor] Embedding text for ${emailId}: ${textToEmbed.length} chars (subject: ${subject.length}, body: ${truncatedBody.length})`);
 
       // Generate embedding
       const embedding = await this.embeddingsService.embedText(textToEmbed);
@@ -115,6 +134,9 @@ export class EmbeddingsProcessorService {
         this.logger.warn(`[EmbeddingsProcessor] Failed to generate embedding for email ${emailId}`);
         return;
       }
+
+      // Debug: Log embedding details before saving
+      this.logger.debug(`[EmbeddingsProcessor] About to save embedding for ${emailId}: length=${embedding.length}, first 3 values=[${embedding.slice(0, 3).join(', ')}]`);
 
       // Store embedding in database
       await this.emailModel.updateOne(
@@ -139,6 +161,59 @@ export class EmbeddingsProcessorService {
     const headers = payload.headers || [];
     const subjectHeader = headers.find((h: any) => h.name === 'Subject');
     return subjectHeader?.value || '';
+  }
+
+  /**
+   * Extract full email body from payload
+   * Recursively extracts text from parts (text/plain or text/html)
+   */
+  private extractEmailBody(payload: any): string {
+    if (!payload) return '';
+
+    // If payload has body.data directly
+    if (payload.body?.data) {
+      try {
+        return Buffer.from(payload.body.data, 'base64').toString('utf-8');
+      } catch (e) {
+        this.logger.warn('[EmbeddingsProcessor] Failed to decode body.data');
+      }
+    }
+
+    // If payload has parts, recursively extract
+    if (payload.parts && Array.isArray(payload.parts)) {
+      let textContent = '';
+
+      for (const part of payload.parts) {
+        // Prioritize text/plain
+        if (part.mimeType === 'text/plain' && part.body?.data) {
+          try {
+            const decoded = Buffer.from(part.body.data, 'base64').toString('utf-8');
+            textContent += decoded + ' ';
+          } catch (e) {
+            // Ignore decode errors
+          }
+        }
+        // Fallback to text/html
+        else if (part.mimeType === 'text/html' && part.body?.data && !textContent) {
+          try {
+            const decoded = Buffer.from(part.body.data, 'base64').toString('utf-8');
+            // Simple HTML tag removal (not perfect but good enough)
+            const stripped = decoded.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ');
+            textContent += stripped + ' ';
+          } catch (e) {
+            // Ignore decode errors
+          }
+        }
+        // Recursively check nested parts
+        else if (part.parts) {
+          textContent += this.extractEmailBody(part) + ' ';
+        }
+      }
+
+      return textContent.trim();
+    }
+
+    return '';
   }
 
   /**

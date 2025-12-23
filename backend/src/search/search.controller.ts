@@ -30,7 +30,7 @@ interface SearchQueryDto {
 export class SearchController {
   private readonly logger = new Logger(SearchController.name);
 
-  constructor(private readonly searchService: SearchService) {}
+  constructor(private readonly searchService: SearchService) { }
 
   /**
    * 🔍 GET /api/search?q=<query>&fields=subject,sender&limit=20&offset=0&label=INBOX
@@ -54,7 +54,7 @@ export class SearchController {
     try {
       // 🔐 Debug JWT + user
       this.logger.log(`[Search] Request: q="${query.q}", label="${query.label}", user=${user?.sub || 'UNDEFINED'}`);
-      
+
       if (!user || !user.sub) {
         this.logger.error('[Search] ❌ User not authenticated or missing sub');
         throw new BadRequestException('JWT token không hợp lệ hoặc đã hết hạn');
@@ -169,6 +169,39 @@ export class SearchController {
       this.logger.error(`Suggestions error: ${error instanceof Error ? error.message : String(error)}`);
       if (error instanceof BadRequestException) throw error;
       throw new InternalServerErrorException('Lỗi lấy gợi ý');
+    }
+  }
+
+  /**
+   * 🧠 POST /api/search/generate-embeddings
+   * 
+   * Generate embeddings for all user emails that don't have them yet.
+   * This is useful for:
+   * - Initial setup after enabling semantic search
+   * - Fixing emails that failed to generate embeddings
+   * - Migrating existing emails to use embeddings
+   */
+  @UseGuards(JwtAuthGuard)
+  @Post('generate-embeddings')
+  async generateEmbeddings(@CurrentUser() user: CurrentUserPayload) {
+    try {
+      if (!user || !user.sub) {
+        throw new BadRequestException('JWT token không hợp lệ');
+      }
+
+      this.logger.log(`[GenerateEmbeddings] Starting for user ${user.sub}`);
+
+      // Call the embeddings processor service
+      await this.searchService.generateEmbeddingsForUser(user.sub);
+
+      return {
+        success: true,
+        message: 'Đang tạo embeddings cho emails. Quá trình này có thể mất vài phút.',
+      };
+    } catch (error) {
+      this.logger.error(`Generate embeddings error: ${error instanceof Error ? error.message : String(error)}`);
+      if (error instanceof BadRequestException) throw error;
+      throw new InternalServerErrorException('Lỗi tạo embeddings');
     }
   }
 

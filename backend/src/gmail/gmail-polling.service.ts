@@ -2,6 +2,7 @@ import { Injectable, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
 import { UsersService } from '../users/users.service';
 import { GmailService } from './gmail.service';
 import { SseService } from './sse.service';
+import { EmbeddingsProcessorService } from '../search/embeddings-processor.service';
 
 @Injectable()
 export class GmailPollingService implements OnModuleInit, OnModuleDestroy {
@@ -12,7 +13,8 @@ export class GmailPollingService implements OnModuleInit, OnModuleDestroy {
     private readonly usersService: UsersService,
     private readonly gmailService: GmailService,
     private readonly sseService: SseService,
-  ) {}
+    private readonly embeddingsProcessor: EmbeddingsProcessorService,
+  ) { }
 
   async onModuleInit() {
     console.log('[Gmail Polling] Service initialized');
@@ -81,7 +83,7 @@ export class GmailPollingService implements OnModuleInit, OnModuleDestroy {
   private async pollGmailForUser(userId: string) {
     try {
       console.log(`[Gmail Polling] 🔄 Polling for user ${userId}...`);
-      
+
       // 1. Lấy lastHistoryId từ DB
       const lastHistoryId = await this.usersService.getLastHistoryId(userId);
       console.log(`[Gmail Polling] Last historyId: ${lastHistoryId || 'none (will do full sync)'}`);
@@ -104,7 +106,7 @@ export class GmailPollingService implements OnModuleInit, OnModuleDestroy {
       if (result && 'changed' in result && 'deleted' in result) {
         if (result.changed > 0 || result.deleted > 0) {
           console.log(`[Gmail Polling] User ${userId} has ${result.changed} changes, ${result.deleted} deletions`);
-          
+
           this.sseService.broadcast(userId, {
             type: 'gmail-updated',
             userId,
@@ -125,10 +127,21 @@ export class GmailPollingService implements OnModuleInit, OnModuleDestroy {
             totalEmails: result.emails,
           },
         });
+
+        // Generate embeddings for all emails after full sync
+        console.log(`[Gmail Polling] 🧠 Triggering embeddings generation after full sync...`);
+        this.embeddingsProcessor.processEmailEmbeddings(userId)
+          .then(() => {
+            console.log(`[Gmail Polling] ✅ Embeddings generation completed for user ${userId}`);
+          })
+          .catch((err: unknown) => {
+            const e = err as Error;
+            console.error(`[Gmail Polling] ❌ Embeddings generation failed: ${e.message}`);
+          });
       }
     } catch (err: any) {
       console.error(`[Gmail Polling] Error polling for user ${userId}:`, err.message);
-      
+
       // Nếu auth error, dừng polling
       if (err.message?.includes('authentication') || err.message?.includes('invalid_grant')) {
         console.warn(`[Gmail Polling] Auth error for user ${userId}, stopping polling`);

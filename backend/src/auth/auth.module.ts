@@ -1,5 +1,5 @@
 
-import { Module } from '@nestjs/common';
+import { Module, forwardRef } from '@nestjs/common';
 import { AuthService } from './auth.service';
 import { AuthController } from './auth.controller';
 import { UsersModule } from '../users/users.module';
@@ -12,6 +12,7 @@ import { JwtRefreshTokenStrategy } from './jwt-refresh.strategy';
 import { GoogleStrategy } from './google.strategy';
 import { GmailModule } from '../gmail/gmail.module';
 import { ImapModule } from '../imap/imap.module';
+import { SearchModule } from '../search/search.module';
 
 @Module({
   imports: [
@@ -20,6 +21,7 @@ import { ImapModule } from '../imap/imap.module';
     ConfigModule,
     GmailModule,
     ImapModule,
+    forwardRef(() => SearchModule), // Use forwardRef to avoid circular dependency
     JwtModule.registerAsync({
       imports: [ConfigModule],
       useFactory: async (configService: ConfigService) => ({
@@ -39,4 +41,4 @@ import { ImapModule } from '../imap/imap.module';
   controllers: [AuthController],
   exports: [JwtModule, AuthService],
 })
-export class AuthModule {}
+export class AuthModule { }

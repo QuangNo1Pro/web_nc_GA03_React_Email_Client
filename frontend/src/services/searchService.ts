@@ -1,7 +1,7 @@
 import { api } from './api';
 
 export interface SearchResult {
-  _id: string;
+  id: string; // Changed from _id to match backend response
   sender: string;
   subject: string;
   snippet: string;
@@ -60,7 +60,7 @@ export async function searchEmails(
 
   const url = `/api/search?${params.toString()}`;
   console.log('[searchService] 📡 Calling:', url);
-  
+
   try {
     const response = await api.get<SearchResponse>(url);
     console.log('[searchService] ✅ Response:', response.data);
