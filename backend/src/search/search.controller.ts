@@ -6,6 +6,8 @@ import {
   BadRequestException,
   InternalServerErrorException,
   Logger,
+  Post,
+  Body,
 } from '@nestjs/common';
 import { SearchService } from './search.service';
 import { JwtAuthGuard } from '../auth/jwt.guard';
@@ -28,7 +30,7 @@ interface SearchQueryDto {
 export class SearchController {
   private readonly logger = new Logger(SearchController.name);
 
-  constructor(private readonly searchService: SearchService) {}
+  constructor(private readonly searchService: SearchService) { }
 
   /**
    * 🔍 GET /api/search?q=<query>&fields=subject,sender&limit=20&offset=0&label=INBOX
@@ -52,7 +54,7 @@ export class SearchController {
     try {
       // 🔐 Debug JWT + user
       this.logger.log(`[Search] Request: q="${query.q}", label="${query.label}", user=${user?.sub || 'UNDEFINED'}`);
-      
+
       if (!user || !user.sub) {
         this.logger.error('[Search] ❌ User not authenticated or missing sub');
         throw new BadRequestException('JWT token không hợp lệ hoặc đã hết hạn');
@@ -90,6 +92,116 @@ export class SearchController {
       }
 
       throw new InternalServerErrorException('Lỗi tìm kiếm. Vui lòng thử lại.');
+    }
+  }
+
+  /**
+   * POST /api/search/semantic
+   * Body: { q, limit?, offset?, fields? }
+   */
+  @UseGuards(JwtAuthGuard)
+  @Post('semantic')
+  async semantic(
+    @Body() body: any,
+    @CurrentUser() user: CurrentUserPayload,
+  ) {
+    try {
+      if (!user || !user.sub) throw new BadRequestException('JWT token không hợp lệ');
+      if (!body?.q || body.q.trim().length === 0) throw new BadRequestException('Tham số "q" bắt buộc');
+
+      const limit = Math.min(Number(body.limit) || 20, 100);
+      const offset = Math.max(Number(body.offset) || 0, 0);
+      const label = (body as any).label || undefined;
+
+      const result = await this.searchService.semanticSearch(user.sub, body.q.trim(), limit, offset, label);
+
+      return { success: true, data: result };
+    } catch (error) {
+      this.logger.error(`Semantic search error: ${error instanceof Error ? error.message : String(error)}`);
+      if (error instanceof BadRequestException) throw error;
+      throw new InternalServerErrorException('Lỗi tìm kiếm ngữ nghĩa');
+    }
+  }
+
+  /**
+   * 💡 GET /api/search/suggestions?prefix=<prefix>&label=INBOX&limit=5
+   * 
+   * Get auto-suggestions for type-ahead search
+   * Returns sender names and subject keywords matching the prefix
+   * 
+   * Query params:
+   *   - prefix (required): Text prefix to match (e.g., 'john', 'proj')
+   *   - label (optional): Filter by mailbox (INBOX, SENT, DRAFT, etc.)
+   *   - limit (optional): Max suggestions per category (default: 5, max: 10)
+   */
+  @UseGuards(JwtAuthGuard)
+  @Get('suggestions')
+  async suggestions(
+    @CurrentUser() user: CurrentUserPayload,
+    @Query('prefix') prefix: string,
+    @Query('label') label?: string,
+    @Query('limit') limit?: string | number,
+  ) {
+    try {
+      this.logger.log(`[Suggestions] Request: prefix="${prefix}", label="${label}", user=${user?.sub}`);
+
+      if (!user || !user.sub) {
+        throw new BadRequestException('JWT token không hợp lệ');
+      }
+
+      if (!prefix || prefix.trim().length === 0) {
+        return { success: true, data: { senders: [], subjects: [] } };
+      }
+
+      const suggestionLimit = Math.min(Number(limit) || 5, 10);
+      const suggestions = await this.searchService.getSuggestions(
+        user.sub,
+        prefix.trim(),
+        suggestionLimit,
+        label,
+      );
+
+      return {
+        success: true,
+        data: suggestions,
+      };
+    } catch (error) {
+      this.logger.error(`Suggestions error: ${error instanceof Error ? error.message : String(error)}`);
+      if (error instanceof BadRequestException) throw error;
+      throw new InternalServerErrorException('Lỗi lấy gợi ý');
+    }
+  }
+
+  /**
+   * 🧠 POST /api/search/generate-embeddings
+   * 
+   * Generate embeddings for all user emails that don't have them yet.
+   * This is useful for:
+   * - Initial setup after enabling semantic search
+   * - Fixing emails that failed to generate embeddings
+   * - Migrating existing emails to use embeddings
+   */
+  @UseGuards(JwtAuthGuard)
+  @Post('generate-embeddings')
+  async generateEmbeddings(@CurrentUser() user: CurrentUserPayload) {
+    try {
+      if (!user || !user.sub) {
+        throw new BadRequestException('JWT token không hợp lệ');
+      }
+
+      this.logger.log(`[GenerateEmbeddings] Starting for user ${user.sub}`);
+
+      // Call the embeddings processor service
+      await this.searchService.generateEmbeddingsForUser(user.sub);
+
+      return {
+        success: true,
+        message: 'Đang tạo embeddings cho emails. Quá trình này có thể mất vài phút.',
+      };
+    } catch (error) {
+      this.logger.error(`Generate embeddings error: ${error instanceof Error ? error.message : String(error)}`);
+      if (error instanceof BadRequestException) throw error;
+      throw new InternalServerErrorException('Lỗi tạo embeddings');
     }
   }
 

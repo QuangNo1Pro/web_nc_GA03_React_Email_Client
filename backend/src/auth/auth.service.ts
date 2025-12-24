@@ -3,6 +3,7 @@ import { UsersService } from '../users/users.service';
 import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcrypt';
 import { GmailService } from '../gmail/gmail.service';
+import { EmbeddingsProcessorService } from '../search/embeddings-processor.service';
 
 @Injectable()
 export class AuthService {
@@ -10,7 +11,8 @@ export class AuthService {
     private usersService: UsersService,
     private jwtService: JwtService,
     private gmailService: GmailService,
-  ) {}
+    private embeddingsProcessor: EmbeddingsProcessorService,
+  ) { }
 
   async validateUser(email: string, pass: string): Promise<any> {
     const user = await this.usersService.findByEmail(email);
@@ -72,23 +74,17 @@ export class AuthService {
 
     const userId = dbUser._id.toString();
 
-    // Check if user needs initial sync
-    const needsSync = await this.usersService.needsInitialSync(userId);
-    
-    if (needsSync) {
-      // Run prefetch in background (don't wait)
-      console.log(`🚀 Starting background sync for new user ${userId}...`);
-      this.gmailService.prefetchMailboxesAndEmails(userId)
-        .then(() => {
-          console.log(`✅ Background sync completed for user ${userId}`);
-        })
-        .catch((err: unknown) => {
-          const e = err as Error;
-          console.error(`❌ Background sync failed for user ${userId}:`, e.message);
-        });
-    } else {
-      console.log(`⏭️ User ${userId} already synced, skipping prefetch`);
-    }
+    // ALWAYS generate embeddings for emails that don't have them
+    // This runs in background and doesn't block login
+    console.log(`🧠 Triggering embeddings generation for user ${userId}...`);
+    this.embeddingsProcessor.processEmailEmbeddings(userId)
+      .then(() => {
+        console.log(`✅ Embeddings generation completed for user ${userId}`);
+      })
+      .catch((err: unknown) => {
+        const e = err as Error;
+        console.error(`❌ Embeddings generation failed for user ${userId}:`, e.message);
+      });
 
     return this.login(dbUser);
   }

@@ -38,6 +38,8 @@ export const EmailSchema = new Schema(
     // FEATURE IV: AI Summarization fields
     summary: { type: String, default: null },
     summarizedAt: { type: Date, default: null },
+    // Embeddings for semantic search (optional)
+    embedding: { type: [Number], default: null },
   },
   { 
     timestamps: true,

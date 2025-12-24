@@ -11,6 +11,7 @@ import { ConfigService } from '@nestjs/config';
 import { UserDocument } from './schemas/user.schema';
 import { MailboxDocument } from './schemas/mailbox.schema';
 import { EmailDocument } from './schemas/email.schema';
+import { EmbeddingsService } from '../ai/embeddings.service';
 
 @Injectable()
 export class UsersService {
@@ -18,6 +19,7 @@ export class UsersService {
     @InjectModel('User') private userModel: Model<UserDocument>,
     @InjectModel('Mailbox') private mailboxModel: Model<MailboxDocument>,
     @InjectModel('Email') private emailModel: Model<EmailDocument>,
+    private readonly embeddingsService: EmbeddingsService,
     private readonly configService: ConfigService,
   ) {}
 
@@ -269,7 +271,77 @@ export class UsersService {
         upsert: true,
       },
     }));
-    return this.emailModel.bulkWrite(ops);
+    const res = await this.emailModel.bulkWrite(ops);
+
+    // After saving emails, generate embeddings for emails without embeddings (async best-effort)
+    try {
+      // Find a limited set of emails for this user that do not have embeddings yet
+      const toEmbed = await this.emailModel
+        .find({ userId, $or: [{ embedding: { $exists: false } }, { embedding: null }] })
+        .limit(200)
+        .lean()
+        .exec();
+
+      if (toEmbed.length > 0) {
+        // Generate embeddings sequentially to avoid rate spikes
+        for (const e of toEmbed) {
+          try {
+            const text = this.getTextForEmbedding(e);
+            if (!text || text.trim().length === 0) continue;
+            const embedding = await this.embeddingsService.embedText(text);
+            await this.emailModel.updateOne({ _id: e._id }, { $set: { embedding } }).exec();
+          } catch (innerErr: any) {
+            // Log and continue with other emails
+            console.warn('Embedding generation failed for email', e._id, (innerErr && innerErr.message) || String(innerErr));
+          }
+        }
+      }
+    } catch (err: any) {
+      console.warn('Failed to generate embeddings after saveEmails:', (err && err.message) || String(err));
+    }
+
+    return res;
+  }
+
+  private getTextForEmbedding(email: any): string {
+    // Prefer subject + body; fallback to snippet
+    const headers = email.payload?.headers || [];
+    const subject = headers.find((h: any) => h.name === 'Subject')?.value || '';
+
+    // Try to extract body from payload parts
+    let body = '';
+    try {
+      const parts = email.payload?.parts || [];
+      if (Array.isArray(parts) && parts.length > 0) {
+        const part = parts.find((p: any) => p.mimeType === 'text/plain') || parts[0];
+        body = (part?.body?.data) || part?.body || '';
+      } else if (email.payload?.body?.data) {
+        body = email.payload.body.data;
+      }
+    } catch (e) {
+      body = '';
+    }
+
+    // If body looks like base64, try to decode
+    try {
+      if (typeof body === 'string' && /[^A-Za-z0-9+/=\s]/.test(body) === false && body.length > 100) {
+        // base64-ish
+        try {
+          body = Buffer.from(body, 'base64').toString('utf8');
+        } catch (e) {
+          // ignore
+        }
+      }
+    } catch (e) {
+      // ignore
+    }
+
+    // Fallback to snippet
+    if (!body || body.trim().length === 0) body = email.snippet || '';
+
+    // Strip HTML tags simply
+    const cleaned = (subject + '\n\n' + body).replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+    return cleaned;
   }
 
   async getEmailsByLabel(userId: string, labelId: string, page = 1, limit = 200) {
