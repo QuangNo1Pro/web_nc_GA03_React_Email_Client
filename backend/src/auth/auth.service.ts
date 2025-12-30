@@ -4,6 +4,7 @@ import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcrypt';
 import { GmailService } from '../gmail/gmail.service';
 import { EmbeddingsProcessorService } from '../search/embeddings-processor.service';
+import { MultiDeviceLogoutService } from './multi-device-logout.service';
 
 @Injectable()
 export class AuthService {
@@ -12,6 +13,7 @@ export class AuthService {
     private jwtService: JwtService,
     private gmailService: GmailService,
     private embeddingsProcessor: EmbeddingsProcessorService,
+    private multiDeviceLogoutService: MultiDeviceLogoutService,
   ) { }
 
   async validateUser(email: string, pass: string): Promise<any> {
@@ -117,9 +119,12 @@ export class AuthService {
   // ======================================
   // LOGOUT
   // ======================================
-  async logout(userId: string) {
+  async logout(userId: string, socketId?: string) {
     await this.gmailService.revokeToken(userId);
-    return this.usersService.setCurrentRefreshToken(userId, null);
+    await this.usersService.setCurrentRefreshToken(userId, null);
+    this.recordMultiDeviceLogout(userId, socketId);
+
+    return { success: true };
   }
 
   // ======================================
@@ -136,5 +141,26 @@ export class AuthService {
     return {
       access_token: this.jwtService.sign(payload),
     };
+  }
+
+  /**
+   * Record logout on another device for multi-device logout sync
+   */
+  recordMultiDeviceLogout(userId: string, deviceId?: string): void {
+    this.multiDeviceLogoutService.recordLogout(userId, deviceId);
+  }
+
+  /**
+   * Check if user has logged out on another device
+   */
+  hasMultiDeviceLogout(userId: string, lastCheckTime: Date): boolean {
+    return this.multiDeviceLogoutService.hasLogoutOccurred(userId, lastCheckTime);
+  }
+
+  /**
+   * Clear logout event for a user after they check it
+   */
+  clearMultiDeviceLogout(userId: string): void {
+    this.multiDeviceLogoutService.clearLogoutEvent(userId);
   }
 }

@@ -13,6 +13,7 @@ import { GoogleStrategy } from './google.strategy';
 import { GmailModule } from '../gmail/gmail.module';
 import { ImapModule } from '../imap/imap.module';
 import { SearchModule } from '../search/search.module';
+import { MultiDeviceLogoutService } from './multi-device-logout.service';
 
 @Module({
   imports: [
@@ -37,8 +38,9 @@ import { SearchModule } from '../search/search.module';
     JwtStrategy,
     JwtRefreshTokenStrategy,
     GoogleStrategy,
+    MultiDeviceLogoutService,
   ],
   controllers: [AuthController],
-  exports: [JwtModule, AuthService],
+  exports: [JwtModule, AuthService, MultiDeviceLogoutService],
 })
 export class AuthModule { }
