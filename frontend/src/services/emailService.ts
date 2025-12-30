@@ -134,3 +134,12 @@ export const summarizeEmail = async (emailId: string) => {
   const { data } = await api.post(`/gmail/emails/${emailId}/summarize`);
   return data;
 };
+/**
+ * Get Gmail link to open email in Gmail web
+ * @param messageId - Email message ID
+ * @returns Gmail URL
+ */
+export const getGmailLink = async (messageId: string) => {
+  const { data } = await api.get(`/gmail/emails/${messageId}/open-in-gmail`);
+  return data.url;
+};
