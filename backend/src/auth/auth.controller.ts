@@ -79,12 +79,50 @@ export class AuthController {
     @Request() req: any,
     @Res({ passthrough: true }) res: Response,
   ) {
-    await this.authService.logout(req.user.userId);
+    const userId = req.user?.userId || req.user?.sub;
+    const deviceId = req.body?.deviceId; // Optional: device identifier
+
+    // Record logout for all other devices
+    if (userId) {
+      this.authService.recordMultiDeviceLogout(userId, deviceId);
+    }
+
+    await this.authService.logout(userId);
     res.clearCookie('access_token', { path: '/' });
     res.clearCookie('refresh_token', { path: '/' });
     return {
       status: 'success',
       message: 'Đăng xuất thành công',
+    };
+  }
+
+  /**
+   * Check if user has been logged out on another device
+   * Frontend polls this endpoint periodically
+   */
+  @UseGuards(AuthGuard('jwt'))
+  @Get('check-device-logout')
+  async checkDeviceLogout(@Request() req: any) {
+    const userId = req.user?.userId || req.user?.sub;
+    const lastCheckTime = new Date(req.query.lastCheck || 0);
+
+    if (!userId) {
+      return { loggedOut: false };
+    }
+
+    const hasLoggedOut = this.authService.hasMultiDeviceLogout(
+      userId,
+      lastCheckTime,
+    );
+
+    // Clear logout event after checking it to prevent re-triggering on next poll
+    if (hasLoggedOut) {
+      this.authService.clearMultiDeviceLogout(userId);
+    }
+
+    return {
+      loggedOut: hasLoggedOut,
+      currentTime: new Date().toISOString(),
     };
   }
 

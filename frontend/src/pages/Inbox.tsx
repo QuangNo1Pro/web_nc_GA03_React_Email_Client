@@ -12,6 +12,7 @@ import { api } from '../services/api';
 import { searchEmails, semanticSearchEmails, SearchResult } from '../services/searchService';
 import { SearchBar } from '../components/SearchBar';
 import { SearchResultsList } from '../components/SearchResultsList';
+import { useSearchMode } from '../components/SearchModeSelector';
 import {
   fetchMailboxes,
   fetchEmails,
@@ -102,6 +103,7 @@ export default function Inbox() {
   const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
   const [searchError, setSearchError] = useState<string | null>(null);
   const [isInSearchMode, setIsInSearchMode] = useState(false);
+  const [searchMode, setSearchMode] = useSearchMode();
 
   // Debug: log search state changes
   useEffect(() => {
@@ -445,12 +447,13 @@ export default function Inbox() {
   };
 
   /**
-   * 🔍 Handle fuzzy search
-   * - Call API /api/search with selected mailbox filter
+   * 🔍 Handle search (Fuzzy or Semantic based on mode)
+   * - Call appropriate API based on searchMode
+   * - Filter by selected mailbox
    * - Switch to search results view
    */
   const handleSearch = async (query: string) => {
-    console.log('[Inbox] 🔍 handleSearch called with:', query, 'in mailbox:', selectedMailbox);
+    console.log('[Inbox] 🔍 handleSearch called with:', query, 'in mailbox:', selectedMailbox, 'mode:', searchMode);
     
     // Check auth token status
     const token = localStorage.getItem('access_token');
@@ -467,13 +470,19 @@ export default function Inbox() {
       setIsSearching(true);
       setSearchError(null);
       setIsInSearchMode(true); // Set search mode immediately
-      console.log('[Inbox] 📡 Calling semanticSearch API with label:', selectedMailbox);
+      console.log('[Inbox] 📡 Calling', searchMode, 'search API with label:', selectedMailbox);
       
-      const response = await semanticSearchEmails(query, {
-        limit: 50,
-        offset: 0,
-        label: selectedMailbox, // ✅ Filter by selected mailbox
-      });
+      const response = searchMode === 'fuzzy'
+        ? await searchEmails(query, {
+            limit: 50,
+            offset: 0,
+            label: selectedMailbox, // ✅ Filter by selected mailbox
+          })
+        : await semanticSearchEmails(query, {
+            limit: 50,
+            offset: 0,
+            label: selectedMailbox, // ✅ Filter by selected mailbox
+          });
 
       console.log('🔍 Search results:', response.data.results);
       setSearchResults(response.data.results);
@@ -1500,6 +1509,7 @@ export default function Inbox() {
                 onClear={handleClearSearch}
                 placeholder="Tìm email (typo-tolerant)..."
                 label={selectedMailbox}
+                showModeSelector={true}
               />
             </div>
 

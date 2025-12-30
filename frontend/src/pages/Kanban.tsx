@@ -2,6 +2,7 @@
  * Kanban Page
  * Full-page Kanban view with app shell (header, search, profile)
  * Integrates seamlessly with existing Inbox layout
+ * Supports both Fuzzy and Semantic search modes
  */
 
 import React, { useState, useEffect } from 'react';
@@ -17,6 +18,7 @@ import { useGmailSSE } from '../hooks/useGmailSSE';
 import toast from 'react-hot-toast';
 import { searchEmails, semanticSearchEmails, SearchResponse } from '../services/searchService';
 import { SearchBar } from '../components/SearchBar';
+import { useSearchMode } from '../components/SearchModeSelector';
 
 const Kanban: React.FC = () => {
   const navigate = useNavigate();
@@ -26,6 +28,7 @@ const Kanban: React.FC = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [showSnoozedManager, setShowSnoozedManager] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
+  const [searchMode, setSearchMode] = useSearchMode();
   const queryClient = useQueryClient();
 
   // F1 + F2: Fuzzy search states
@@ -99,12 +102,15 @@ const Kanban: React.FC = () => {
     if (e.key !== 'Enter') return;
     if (!searchQuery.trim()) return;
 
-    console.log('[Kanban] 🔍 Search submit:', searchQuery);
+    console.log('[Kanban] 🔍 Search submit:', searchQuery, 'Mode:', searchMode);
     setIsSearching(true);
     setSearchError(null);
 
     try {
-      const results = await semanticSearchEmails(searchQuery.trim(), { limit: 100 });
+      // Use appropriate search function based on mode
+      const results = searchMode === 'fuzzy'
+        ? await searchEmails(searchQuery.trim(), { limit: 100 })
+        : await semanticSearchEmails(searchQuery.trim(), { limit: 100 });
       console.log('[Kanban] 📡 Search API response:', results);
       // Unwrap response: { success, data: { total, results } }
       setSearchResults(results.data);
@@ -219,6 +225,7 @@ const Kanban: React.FC = () => {
             isLoading={isSearching}
             onClear={handleClearSearch}
             placeholder="Tìm email: subject, sender, hoặc nội dung..."
+            showModeSelector={true}
           />
         </div>
 

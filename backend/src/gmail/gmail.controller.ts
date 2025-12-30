@@ -606,5 +606,27 @@ export class GmailController {
 
     return { success: true, columns };
   }
+
+  /**
+   * Get Gmail link to open email in Gmail web
+   * GET /gmail/emails/:messageId/open-in-gmail
+   */
+  @Get('emails/:messageId/open-in-gmail')
+  @UseGuards(AuthGuard('jwt'))
+  async getGmailLink(
+    @Req() req: ExpressRequest,
+    @Param('messageId') messageId: string,
+  ) {
+    const userId = (req.user as any).userId;
+    
+    // Gmail web URL format: https://mail.google.com/mail/u/0/#inbox/{messageId}
+    // Or use search: https://mail.google.com/mail/u/0/#search/{messageId}
+    const gmailUrl = `https://mail.google.com/mail/u/0/#inbox/${messageId}`;
+    
+    return { 
+      url: gmailUrl,
+      messageId 
+    };
+  }
 }
 

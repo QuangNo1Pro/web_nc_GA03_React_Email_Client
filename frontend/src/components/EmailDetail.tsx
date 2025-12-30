@@ -1,8 +1,9 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { FaRegStar, FaStar } from 'react-icons/fa';
 import { FiFileText, FiTrash2 } from 'react-icons/fi';
 import { ArrowReply20Regular, ArrowReplyAll20Regular, ArrowForward20Regular } from '@fluentui/react-icons';
 import { getAvatarColor, extractEmails } from '../utils/emailUtils';
+import { getGmailLink } from '../services/emailService';
 import toast from 'react-hot-toast';
 
 interface EmailDetailProps {
@@ -54,7 +55,25 @@ const EmailDetail: React.FC<EmailDetailProps> = ({
   setIsStarHoveredDetail,
   setIsDeleteHoveredDetail,
 }) => {
+  const [isGmailHovered, setIsGmailHovered] = useState(false);
+  const [isOpeningGmail, setIsOpeningGmail] = useState(false);
+
   if (!email) return null;
+
+  // Handle open in Gmail
+  const handleOpenInGmail = async () => {
+    try {
+      setIsOpeningGmail(true);
+      const gmailUrl = await getGmailLink(email.id);
+      window.open(gmailUrl, '_blank');
+      toast.success('Opened in Gmail');
+    } catch (error) {
+      console.error('Failed to get Gmail link:', error);
+      toast.error('Failed to open in Gmail');
+    } finally {
+      setIsOpeningGmail(false);
+    }
+  };
 
   // Parse sender name and email
   const parseSender = () => {
@@ -264,6 +283,34 @@ const EmailDetail: React.FC<EmailDetailProps> = ({
                   className="w-5 h-5"
                   style={{ color: isDeleteHoveredDetail ? 'var(--error)' : 'var(--text-secondary)' }}
                 />
+              </button>
+              <div
+                className="h-6 w-px mx-1 -translate-y-[10px]"
+                style={{ backgroundColor: 'var(--border-primary)' }}
+              />
+              <button
+                onClick={handleOpenInGmail}
+                disabled={isOpeningGmail}
+                className="p-2.5 rounded-lg transition-all -translate-y-[10px]"
+                title="Mở trong Gmail"
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.backgroundColor = 'var(--bg-hover)';
+                  setIsGmailHovered(true);
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.backgroundColor = 'transparent';
+                  setIsGmailHovered(false);
+                }}
+              >
+                <span
+                  className="material-symbols-outlined"
+                  style={{
+                    fontSize: '20px',
+                    color: isGmailHovered ? 'var(--accent-primary)' : 'var(--text-secondary)'
+                  }}
+                >
+                  open_in_new
+                </span>
               </button>
             </div>
           </div>
