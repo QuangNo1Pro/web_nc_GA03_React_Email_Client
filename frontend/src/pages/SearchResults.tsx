@@ -1,14 +1,16 @@
 /**
  * SearchResults Component
- * Displays fuzzy search results as a list of email cards
+ * Displays search results (fuzzy or semantic based on user selection) as a list of email cards
  * Shows loading, no results, and error states
  * Allows user to navigate back to inbox/kanban view
+ * Mode can be switched between Fuzzy and Semantic search
  */
 
 import React, { useState, useEffect } from 'react';
 import { searchEmails, semanticSearchEmails, SearchResponse } from '../services/searchService';
 import SearchBar from './SearchBar';
 import { Email } from '../types/email';
+import { useSearchMode, SearchMode } from '../components/SearchModeSelector';
 
 interface SearchResultsProps {
   onClose?: () => void; // Callback to return to normal view (inbox/kanban)
@@ -20,6 +22,7 @@ const SearchResults: React.FC<SearchResultsProps> = ({ onClose }) => {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [page, setPage] = useState(0);
+  const [searchMode, setSearchMode] = useSearchMode();
 
   const limit = 20;
 
@@ -35,8 +38,10 @@ const SearchResults: React.FC<SearchResultsProps> = ({ onClose }) => {
 
     setIsLoading(true);
     try {
-    // Prefer semantic search if available
-    const data = await semanticSearchEmails(searchQuery, { limit, offset: 0 });
+      // Call appropriate search function based on mode
+      const data = searchMode === 'fuzzy'
+        ? await searchEmails(searchQuery, { limit, offset: 0 })
+        : await semanticSearchEmails(searchQuery, { limit, offset: 0 });
       setResults(data);
     } catch (err: any) {
       setError(err.response?.data?.message || 'Failed to search. Please try again.');
@@ -52,7 +57,9 @@ const SearchResults: React.FC<SearchResultsProps> = ({ onClose }) => {
     setIsLoading(true);
     try {
       const nextPage = page + 1;
-      const data = await semanticSearchEmails(query, { limit, offset: nextPage * limit });
+      const data = searchMode === 'fuzzy'
+        ? await searchEmails(query, { limit, offset: nextPage * limit })
+        : await semanticSearchEmails(query, { limit, offset: nextPage * limit });
       setResults({
         total: data.total,
         results: [...results.results, ...data.results],
@@ -78,7 +85,9 @@ const SearchResults: React.FC<SearchResultsProps> = ({ onClose }) => {
       {/* Header with search bar and back button */}
       <div className="sticky top-0 z-10 bg-white border-b border-gray-200 p-4 space-y-3 shadow-sm">
         <div className="flex items-center justify-between gap-2">
-          <h1 className="text-lg font-semibold">Search Results</h1>
+          <h1 className="text-lg font-semibold">
+            Search Results {searchMode === 'fuzzy' ? '⚡ (Fuzzy)' : '🧠 (Semantic)'}
+          </h1>
           {query && (
             <button
               onClick={handleBack}
@@ -89,7 +98,7 @@ const SearchResults: React.FC<SearchResultsProps> = ({ onClose }) => {
             </button>
           )}
         </div>
-        <SearchBar onSearch={handleSearch} isLoading={isLoading} />
+        <SearchBar onSearch={handleSearch} isLoading={isLoading} showModeSelector={true} />
       </div>
 
       {/* Results area */}

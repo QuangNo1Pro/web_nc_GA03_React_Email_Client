@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { CircleX, Search } from 'lucide-react';
 import { getSearchSuggestions } from '../services/searchService';
+import { SearchModeSelector, SearchMode, useSearchMode } from './SearchModeSelector';
 
 interface SearchBarProps {
   onSearch: (query: string) => void;
@@ -8,6 +9,7 @@ interface SearchBarProps {
   onClear?: () => void;
   placeholder?: string;
   label?: string; // Optional: current mailbox/label for suggestions filtering
+  showModeSelector?: boolean; // Show search mode toggle
 }
 
 /**
@@ -16,6 +18,7 @@ interface SearchBarProps {
  * - Arrow keys để navigate suggestions
  * - Enter để search, Escape để close dropdown
  * - Click suggestion để search với suggestion text
+ * - Optional: Search mode selector (Fuzzy vs Semantic)
  */
 export function SearchBar({
   onSearch,
@@ -23,6 +26,7 @@ export function SearchBar({
   onClear,
   placeholder = 'Tìm kiếm email...',
   label,
+  showModeSelector = false,
 }: SearchBarProps) {
   const [query, setQuery] = useState('');
   const [suggestions, setSuggestions] = useState<{
@@ -32,6 +36,7 @@ export function SearchBar({
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [loadingSuggestions, setLoadingSuggestions] = useState(false);
   const [selectedSuggestionIndex, setSelectedSuggestionIndex] = useState(-1);
+  const [searchMode, setSearchMode] = useSearchMode();
   const suggestionsRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -160,7 +165,15 @@ export function SearchBar({
   };
 
   return (
-    <div className="relative">
+    <div className="relative space-y-2">
+      {/* Search mode selector */}
+      {showModeSelector && (
+        <div className="flex justify-end px-1">
+          <SearchModeSelector mode={searchMode} onChange={setSearchMode} size="sm" />
+        </div>
+      )}
+      
+      {/* Search input */}
       <div 
         className="flex items-center gap-2 px-3 py-2 border rounded-lg focus-within:ring-2 focus-within:ring-blue-500"
         style={{
