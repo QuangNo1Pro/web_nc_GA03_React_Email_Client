@@ -51,13 +51,13 @@ const Kanban: React.FC = () => {
         const { email, originalStatus } = event.detail;
         console.log('[Kanban] 🔄 Refreshing board due to unsnooze event');
         console.log('[Kanban] Email restored:', email?.subject, '→', originalStatus);
-        
+
         // Invalidate Kanban emails query to refetch
         queryClient.invalidateQueries({ queryKey: ['kanban-emails'] });
-        
+
         // Force component refresh as backup
         setRefreshKey(prev => prev + 1);
-        
+
         toast.success(`Email "${email?.subject}" moved back to ${originalStatus}`, {
           duration: 3000,
         });
@@ -73,16 +73,16 @@ const Kanban: React.FC = () => {
     const handleSummaryGenerated = (event: any) => {
       console.log('[Kanban] ✨ AI Summary generated:', event.detail);
       const { messageId, summary } = event.detail;
-      
+
       // Update the email in cache with new summary
       queryClient.setQueryData<any[]>(['kanban-emails'], (oldEmails = []) => {
-        return oldEmails.map(email => 
-          email.id === messageId 
-            ? { ...email, summary } 
+        return oldEmails.map(email =>
+          email.id === messageId
+            ? { ...email, summary }
             : email
         );
       });
-      
+
       toast.success('AI summary generated successfully', {
         duration: 2000,
       });
@@ -188,11 +188,11 @@ const Kanban: React.FC = () => {
               className="text-xl font-bold hidden sm:block"
               style={{ color: 'var(--text-primary)' }}
             >
-            React Email Client
+              React Email Client
             </h1>
           </div>
-          
-          
+
+
 
           {/* Snoozed Manager Button */}
           <button
@@ -274,7 +274,7 @@ const Kanban: React.FC = () => {
               >
 
                 {/* View Toggle Button */}
-          <button
+                <button
                   className="w-full px-4 py-3 flex items-center gap-3 transition-all"
                   style={{ color: 'var(--text-primary)' }}
                   onClick={() => {
@@ -292,7 +292,7 @@ const Kanban: React.FC = () => {
                   <MaterialIcon name="view_list" size={20} />
                   Traditional View
                 </button>
-                
+
                 <button
                   className="w-full px-4 py-3 flex items-center gap-3 transition-all"
                   style={{ color: 'var(--text-primary)' }}
@@ -345,7 +345,7 @@ const Kanban: React.FC = () => {
             style={{ borderColor: 'var(--border-primary)', backgroundColor: 'var(--bg-primary)' }}
           >
             <h2 className="font-semibold">
-              Search Results for "<strong>{searchQuery}</strong>" 
+              Search Results for "<strong>{searchQuery}</strong>"
               {searchResults && searchResults.total > 0 && (
                 <span style={{ color: 'var(--text-secondary)', marginLeft: '8px', fontWeight: 'normal' }}>
                   ({searchResults.total} emails)
@@ -398,16 +398,16 @@ const Kanban: React.FC = () => {
             </div>
           ) : (
             <>
-              {console.log('[Kanban] 🔍 Passing to KanbanBoard:', { 
-                isSearchOpen, 
+              {console.log('[Kanban] 🔍 Passing to KanbanBoard:', {
+                isSearchOpen,
                 searchResults_exists: !!searchResults,
                 searchResults_data: searchResults,
                 searchResults_results_length: searchResults?.results?.length,
                 will_pass_filteredEmails: isSearchOpen ? searchResults?.results : 'UNDEFINED',
                 will_pass_isSearchMode: isSearchOpen
               })}
-              <KanbanBoard 
-                key={refreshKey} 
+              <KanbanBoard
+                key={refreshKey}
                 filteredEmails={isSearchOpen ? searchResults?.results : undefined}
                 isSearchMode={isSearchOpen}
               />
@@ -460,9 +460,9 @@ const SearchResultsOverlay: React.FC<SearchResultsOverlayProps> = ({
   onCloseDetail,
 }) => {
   // Debug log
-  console.log('[SearchResultsOverlay] Render state:', { 
-    isLoading, 
-    error, 
+  console.log('[SearchResultsOverlay] Render state:', {
+    isLoading,
+    error,
     results: results ? { total: results.total, resultCount: results.results?.length } : null,
     selectedEmailId,
     selectedEmailDetail: selectedEmailDetail ? 'loaded' : null
@@ -621,9 +621,9 @@ const SearchResultsOverlay: React.FC<SearchResultsOverlayProps> = ({
                 gap: '16px',
               }}
             >
-              {results.results.map((result) => (
-                <SearchResultCard 
-                  key={result.id} 
+              {results.results.map((result: any) => (
+                <SearchResultCard
+                  key={result.id}
                   result={result}
                   onSelectDetail={() => onSelectEmail(result.id)}
                   isSelected={selectedEmailId === result.id}
@@ -651,7 +651,7 @@ const SearchResultsOverlay: React.FC<SearchResultsOverlayProps> = ({
  * SearchResultCard Component
  * Card displaying a single search result
  */
-const SearchResultCard: React.FC<{ 
+const SearchResultCard: React.FC<{
   result: any;
   onSelectDetail?: () => void;
   isSelected?: boolean;

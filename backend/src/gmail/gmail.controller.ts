@@ -229,6 +229,32 @@ export class GmailController {
     }
   }
 
+  /**
+   * Get all archived emails for current user (Done column)
+   * GET /gmail/emails/archived
+   * Archived = emails not in INBOX, TRASH, SPAM, DRAFT
+   */
+  @Get('emails/archived')
+  @UseGuards(AuthGuard('jwt'))
+  async getArchivedEmails(@Req() req: ExpressRequest, @Query('limit') limit?: number) {
+    console.log('[Controller] 📥 GET /gmail/emails/archived - Request received, limit:', limit);
+
+    const userId = (req.user as any)?.userId;
+    if (!userId) {
+      throw new UnauthorizedException('User ID not found in token.');
+    }
+
+    try {
+      const maxResults = limit ? Math.min(Number(limit), 500) : 50; // Cap at 500
+      const result = await this.gmailService.getArchivedEmails(userId, maxResults);
+      console.log('[Controller] ✅ Returning', result.messages.length, 'archived emails');
+      return result;
+    } catch (error: any) {
+      console.error('[Controller] ❌ Error getting archived emails:', error.message);
+      throw error;
+    }
+  }
+
   @Get('emails/:messageId')
   @UseGuards(AuthGuard('jwt'))
   getEmail(@Request() req: ExpressRequest, @Param('messageId') messageId: string) {
@@ -618,14 +644,14 @@ export class GmailController {
     @Param('messageId') messageId: string,
   ) {
     const userId = (req.user as any).userId;
-    
+
     // Gmail web URL format: https://mail.google.com/mail/u/0/#inbox/{messageId}
     // Or use search: https://mail.google.com/mail/u/0/#search/{messageId}
     const gmailUrl = `https://mail.google.com/mail/u/0/#inbox/${messageId}`;
-    
-    return { 
+
+    return {
       url: gmailUrl,
-      messageId 
+      messageId
     };
   }
 }

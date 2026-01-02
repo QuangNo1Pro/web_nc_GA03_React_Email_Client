@@ -11,6 +11,7 @@ class MultiDeviceLogoutSync {
   private lastCheckTime: Date = new Date();
   private isPolling = false;
   private onLogoutCallback: (() => void) | null = null;
+  private hasAuthenticated = false; // Track if user was ever successfully authenticated
 
   /**
    * Start polling for logout events from other devices
@@ -23,6 +24,7 @@ class MultiDeviceLogoutSync {
     }
 
     this.isPolling = true;
+    this.hasAuthenticated = true; // Mark as authenticated when polling starts
     console.log('[MultiDeviceLogout] 🔄 Starting multi-device logout polling (every 5s)');
 
     // Poll immediately on start
@@ -67,10 +69,13 @@ class MultiDeviceLogoutSync {
         this.handleLogout();
       }
     } catch (error: any) {
-      // 401 means user is not authenticated (already logged out)
-      if (error.response?.status === 401) {
+      // 401 means user is not authenticated - but only logout if they WERE authenticated before
+      if (error.response?.status === 401 && this.hasAuthenticated) {
         console.log('[MultiDeviceLogout] 🔓 User session expired/invalid');
         this.handleLogout();
+      } else if (error.response?.status === 401) {
+        // 401 during initial login attempt - ignore, not a logout event
+        console.log('[MultiDeviceLogout] ⏳ 401 during initial auth - ignoring');
       } else {
         console.error('[MultiDeviceLogout] ❌ Error checking logout status:', error.message);
       }
@@ -111,6 +116,7 @@ class MultiDeviceLogoutSync {
   public cleanup(): void {
     this.stopPolling();
     this.onLogoutCallback = null;
+    this.hasAuthenticated = false; // Reset auth state on cleanup
     console.log('[MultiDeviceLogout] 🧹 Cleaned up');
   }
 

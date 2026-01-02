@@ -1,5 +1,7 @@
 import { createContext, useContext, useState, useEffect, useCallback } from 'react';
-import { api, clearProviderCache } from '../services/api';
+import { api } from '../services/api';
+import { logoutSync } from '../services/logoutSync';
+import { multiDeviceLogoutSync } from '../services/multiDeviceLogoutSync';
 
 const AuthContext = createContext<any>(null);
 
@@ -19,6 +21,63 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     }
   }, []);
 
+  // Initialize logout sync listeners on mount
+  useEffect(() => {
+    console.log('[AuthContext] 📡 Setting up logout sync listeners');
+
+    // ========== Same-Tab Sync (BroadcastChannel) ==========
+    // Listen for logout events from other tabs
+    logoutSync.onLogout(() => {
+      console.log('[AuthContext] 🔓 Received logout event from another tab');
+      // Clear user state without calling API (other tab already called it)
+      localStorage.removeItem('access_token');
+      setUser(null);
+    });
+
+    // Listen for login events from other tabs
+    logoutSync.onLogin((userId: string) => {
+      console.log('[AuthContext] 🔐 Received login event from another tab. User:', userId);
+      // Refresh user profile from the other tab's login
+      fetchUserProfile();
+    });
+
+    // ========== Multi-Device Sync (Polling) ==========
+    // Listen for logout events from other devices
+    multiDeviceLogoutSync.onLogout(() => {
+      console.log('[AuthContext] 🔓 Received logout event from another device');
+      // Clear user state
+      localStorage.removeItem('access_token');
+      setUser(null);
+      
+      // Stop polling since we're logged out
+      multiDeviceLogoutSync.stopPolling();
+      
+      console.warn('[AuthContext] ⚠️ You have been logged out from another device');
+    });
+
+    // Start polling for multi-device logout (after user is authenticated)
+    // This will be started on login and stopped on logout
+
+    // Cleanup on unmount
+    return () => {
+      logoutSync.cleanup();
+      multiDeviceLogoutSync.cleanup();
+    };
+  }, [fetchUserProfile]);
+
+  // Listen for tab visibility changes and sync logout state if needed
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        console.log('[AuthContext] 👁️ Tab became visible, verifying auth state');
+        fetchUserProfile();
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
+  }, [fetchUserProfile]);
+
   useEffect(() => {
     fetchUserProfile();
   }, [fetchUserProfile]);
@@ -30,6 +89,16 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     }
     // After backend sets cookies, fetch profile to update state
     await fetchUserProfile();
+
+    if (response?.user?.id) {
+      const userId = response.user.id;
+      
+      // Start polling for multi-device logout
+      multiDeviceLogoutSync.startPolling();
+      
+      // Broadcast login to other tabs
+      logoutSync.broadcastLogin(userId);
+    }
   };
 
   const logout = async () => {
@@ -39,10 +108,13 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       console.error('Logout failed', error);
     } finally {
       localStorage.removeItem('access_token');
-      clearProviderCache(); // Clear cached provider data
       setUser(null);
-      // Redirect to login page
-      window.location.href = '/login';
+
+      // Stop polling multi-device logout
+      multiDeviceLogoutSync.stopPolling();
+
+      // Broadcast logout to other tabs (same browser)
+      logoutSync.broadcastLogout();
     }
   };
 

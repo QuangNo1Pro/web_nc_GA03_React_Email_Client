@@ -55,7 +55,7 @@ export class AuthController {
       sameSite: isProduction ? 'none' : 'lax',
       domain: isProduction ? undefined : undefined,
       path: '/',
-      maxAge: 15 * 60 * 1000, // 15 minutes
+      maxAge: 30 * 1000, // 🧪 TEST: 30 seconds (change back to 15 * 60 * 1000)
     });
     res.cookie('refresh_token', tokens.refresh_token, {
       httpOnly: true,
@@ -63,7 +63,7 @@ export class AuthController {
       sameSite: isProduction ? 'none' : 'lax',
       domain: isProduction ? undefined : undefined,
       path: '/',
-      maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
+      maxAge: 2 * 60 * 1000, // 🧪 TEST: 2 minutes (change back to 7 * 24 * 60 * 60 * 1000)
     });
     return {
       status: 'success',
@@ -143,7 +143,7 @@ export class AuthController {
       sameSite: isProduction ? 'none' : 'lax',
       domain: isProduction ? undefined : undefined,
       path: '/',
-      maxAge: 15 * 60 * 1000, // 15 minutes
+      maxAge: 30 * 1000, // 🧪 TEST: 30 seconds (change back to 15 * 60 * 1000)
     });
     return {
       status: 'success',
@@ -182,24 +182,10 @@ export class AuthController {
       maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
     });
 
-    // Send HTML page that will do the redirect with token in URL
-    // This fixes cross-origin cookie issues between different ports
+    // Redirect to frontend /auth-callback with token in URL
+    // This ensures the token is passed even with cross-origin cookie restrictions
     const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
-    res.send(`
-      <!DOCTYPE html>
-      <html>
-        <head>
-          <title>Redirecting...</title>
-        </head>
-        <body>
-          <p>Đang xử lý đăng nhập...</p>
-          <script>
-            // Pass token via URL so frontend can store in localStorage
-            window.location.href = '${frontendUrl}/auth/callback?token=${tokens.access_token}';
-          </script>
-        </body>
-      </html>
-    `);
+    res.redirect(`${frontendUrl}/auth-callback?token=${tokens.access_token}`);
   }
 
   @UseGuards(AuthGuard('jwt'))

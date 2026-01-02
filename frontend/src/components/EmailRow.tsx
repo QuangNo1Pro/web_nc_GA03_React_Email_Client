@@ -110,9 +110,8 @@ const EmailRow: React.FC<EmailRowProps> = ({ index, style, data }) => {
           <div className="relative w-full flex items-center leading-tight">
             {/* Sender */}
             <span
-              className={`truncate pr-12 ${
-                isUnread ? "font-semibold" : "font-normal"
-              }`}
+              className={`truncate pr-12 ${isUnread ? "font-semibold" : "font-normal"
+                }`}
               style={{ color: "var(--text-primary)", fontSize: "0.9rem", marginBottom: "1.5px" }}
             >
               {email.sender}
@@ -165,9 +164,8 @@ const EmailRow: React.FC<EmailRowProps> = ({ index, style, data }) => {
           {/* Subject + Time */}
           <div className="flex justify-between items-center mt-[2px] mb-[4.5px]">
             <span
-              className={`truncate ${
-                isUnread ? "font-semibold" : "font-normal"
-              }`}
+              className={`truncate ${isUnread ? "font-semibold" : "font-normal"
+                }`}
               style={{
                 color: "var(--text-primary)",
                 fontSize: "0.9rem",

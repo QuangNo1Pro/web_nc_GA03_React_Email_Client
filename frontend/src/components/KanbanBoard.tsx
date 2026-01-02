@@ -356,9 +356,9 @@ const KanbanBoard: React.FC<{
   });
 
   return (
-    <>
+    <div className="flex flex-col h-full w-full bg-[var(--bg-primary)]">
       {/* Filter & Sort Controls - UI đồng bộ, tinh tế hơn */}
-      <div className="flex flex-wrap gap-3 items-center px-6 pt-2 pb-2 bg-[var(--bg-secondary)] border-b border-[var(--border-primary)]">
+      <div className="flex-none flex flex-wrap gap-3 items-center px-6 pt-2 pb-2 bg-[var(--bg-secondary)] border-b border-[var(--border-primary)]">
         <div className="flex gap-2 items-center bg-[var(--bg-primary)] rounded-lg px-2 py-1 shadow-sm border border-[var(--border-primary)] hover:shadow-md transition">
           <span className="material-symbols-outlined text-blue-400 text-sm mr-1">sort</span>
           <label className="font-semibold text-xs mr-1 text-[var(--text-secondary)]">Sort:</label>
@@ -432,7 +432,7 @@ const KanbanBoard: React.FC<{
         }}
       >
         <div
-          className="grid h-full w-full bg-gray-100"
+          className="grid flex-1 w-full bg-gray-100 min-h-0"
           style={{
             gridTemplateColumns: `repeat(${displayColumns.length}, 1fr)`,
             gap: '24px', // khoảng cách giữa các cột
@@ -495,7 +495,7 @@ const KanbanBoard: React.FC<{
         onReorderColumns={reorderColumns}
         onResetToDefaults={resetToDefaults}
       />
-    </>
+    </div>
   );
 };
 
