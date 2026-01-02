@@ -958,7 +958,7 @@ export default function Inbox() {
     const id = emailId || selectedEmail;
     if (!id) return;
 
-    // Check if email is in trash
+    // Check if email is in trash or selected mailbox is TRASH
     const emailObj = emails?.find((e: any) => e.id === id);
     const isInTrash = emailObj?.labelIds?.includes('TRASH') || selectedMailbox === 'TRASH';
 
