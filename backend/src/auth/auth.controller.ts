@@ -29,7 +29,7 @@ export class AuthController {
     @Inject(UsersService) private usersService: UsersService,
     @Inject(ImapService) private imapService: ImapService,
     @Inject(EncryptionService) private encryptionService: EncryptionService,
-  ) {}
+  ) { }
 
   @Post('register')
   @HttpCode(HttpStatus.CREATED)
@@ -48,14 +48,14 @@ export class AuthController {
   async login(@Request() req: any, @Res({ passthrough: true }) res: Response) {
     const tokens = await this.authService.login(req.user);
     const isProduction = process.env.NODE_ENV === 'production';
-    
+
     res.cookie('access_token', tokens.access_token, {
       httpOnly: true,
       secure: isProduction,
       sameSite: isProduction ? 'none' : 'lax',
       domain: isProduction ? undefined : undefined,
       path: '/',
-      maxAge: 30 * 1000, // 🧪 TEST: 30 seconds (change back to 15 * 60 * 1000)
+      maxAge: 15 * 60 * 1000, // 15 minutes
     });
     res.cookie('refresh_token', tokens.refresh_token, {
       httpOnly: true,
@@ -63,7 +63,7 @@ export class AuthController {
       sameSite: isProduction ? 'none' : 'lax',
       domain: isProduction ? undefined : undefined,
       path: '/',
-      maxAge: 2 * 60 * 1000, // 🧪 TEST: 2 minutes (change back to 7 * 24 * 60 * 60 * 1000)
+      maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
     });
     return {
       status: 'success',
@@ -136,14 +136,14 @@ export class AuthController {
     // The user object is attached by the jwt-refresh.strategy
     const tokens = await this.authService.refreshToken(req.user);
     const isProduction = process.env.NODE_ENV === 'production';
-    
+
     res.cookie('access_token', tokens.access_token, {
       httpOnly: true,
       secure: isProduction,
       sameSite: isProduction ? 'none' : 'lax',
       domain: isProduction ? undefined : undefined,
       path: '/',
-      maxAge: 30 * 1000, // 🧪 TEST: 30 seconds (change back to 15 * 60 * 1000)
+      maxAge: 15 * 60 * 1000, // 15 minutes
     });
     return {
       status: 'success',
@@ -154,7 +154,7 @@ export class AuthController {
 
   @UseGuards(AuthGuard('google'))
   @Get('google')
-  async googleAuth(@Request() req: any) {}
+  async googleAuth(@Request() req: any) { }
 
   @UseGuards(AuthGuard('google'))
   @Get('google/callback')
@@ -164,7 +164,7 @@ export class AuthController {
   ) {
     const tokens = await this.authService.googleLogin(req.user);
     const isProduction = process.env.NODE_ENV === 'production';
-    
+
     res.cookie('access_token', tokens.access_token, {
       httpOnly: true,
       secure: isProduction,
@@ -181,8 +181,9 @@ export class AuthController {
       path: '/',
       maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
     });
-    
-    // Send HTML page that will do the redirect after ensuring cookies are set
+
+    // Send HTML page that will do the redirect with token in URL
+    // This fixes cross-origin cookie issues between different ports
     const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
     res.send(`
       <!DOCTYPE html>
@@ -193,10 +194,8 @@ export class AuthController {
         <body>
           <p>Đang xử lý đăng nhập...</p>
           <script>
-            // Wait a bit to ensure cookies are processed
-            setTimeout(() => {
-              window.location.href = '${frontendUrl}/inbox';
-            }, 100);
+            // Pass token via URL so frontend can store in localStorage
+            window.location.href = '${frontendUrl}/auth/callback?token=${tokens.access_token}';
           </script>
         </body>
       </html>

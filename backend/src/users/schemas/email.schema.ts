@@ -16,7 +16,9 @@ export interface EmailDocument extends Document {
   summary?: string; // AI-generated summary of email content
   summaryGenerated?: boolean; // Track if summary was already generated (avoid re-generation)
   summarizedAt?: Date; // Timestamp when summary was generated
-  
+  // Full text content extracted from HTML for easy reading
+  textContent?: string;
+
   // Virtual field for clarity when calling Gmail API
   readonly gmailMessageId?: string; // Alias for messageId
   readonly gmailThreadId?: string; // Gmail thread ID if available
@@ -38,10 +40,12 @@ export const EmailSchema = new Schema(
     // FEATURE IV: AI Summarization fields
     summary: { type: String, default: null },
     summarizedAt: { type: Date, default: null },
+    // Full text content extracted from HTML/plain for easy reading
+    textContent: { type: String, default: null },
     // Embeddings for semantic search (optional)
     embedding: { type: [Number], default: null },
   },
-  { 
+  {
     timestamps: true,
     toJSON: { virtuals: true },
     toObject: { virtuals: true }
@@ -49,11 +53,11 @@ export const EmailSchema = new Schema(
 );
 
 // Virtual fields for clarity
-EmailSchema.virtual('gmailMessageId').get(function() {
+EmailSchema.virtual('gmailMessageId').get(function () {
   return this.messageId;
 });
 
-EmailSchema.virtual('gmailThreadId').get(function() {
+EmailSchema.virtual('gmailThreadId').get(function () {
   return this.payload?.threadId || null;
 });
 

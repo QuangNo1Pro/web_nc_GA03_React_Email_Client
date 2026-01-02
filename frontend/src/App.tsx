@@ -5,6 +5,7 @@ import Register from './pages/Register';
 import Login from './pages/Login';
 import Inbox from './pages/Inbox';
 import Kanban from './pages/Kanban';
+import AuthCallback from './pages/AuthCallback';
 import { useQueryClient } from '@tanstack/react-query';
 
 import ProtectedRoute from './components/ProtectedRoute';
@@ -36,6 +37,10 @@ export default function App() {
           <Route
             path="/register"
             element={isAuthenticated ? <Navigate to="/inbox" /> : <Register />}
+          />
+          <Route
+            path="/auth/callback"
+            element={<AuthCallback />}
           />
           <Route
             path="/inbox"

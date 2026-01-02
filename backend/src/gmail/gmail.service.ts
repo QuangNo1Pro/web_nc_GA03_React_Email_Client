@@ -1238,7 +1238,10 @@ export class GmailService {
       // Encode body as base64 for proper UTF-8 handling
       const bodyBase64 = Buffer.from(body, 'utf-8').toString('base64');
       const bodyLines = bodyBase64.match(/.{1,76}/g) || [];
-      emailLines.push(...bodyLines);
+      // Use concat instead of spread to avoid stack overflow on large content
+      for (const line of bodyLines) {
+        emailLines.push(line);
+      }
       emailLines.push('');
 
       attachments.forEach((attachment) => {
@@ -1250,7 +1253,10 @@ export class GmailService {
 
         // Split base64 content into 76-character lines (RFC 2045)
         const base64Lines = attachment.base64Content.match(/.{1,76}/g) || [];
-        emailLines.push(...base64Lines);
+        // Use for loop instead of spread to avoid stack overflow on large files
+        for (const line of base64Lines) {
+          emailLines.push(line);
+        }
         emailLines.push('');
       });
 
@@ -1264,7 +1270,10 @@ export class GmailService {
       // Encode body as base64 for UTF-8
       const bodyBase64 = Buffer.from(body, 'utf-8').toString('base64');
       const bodyLines = bodyBase64.match(/.{1,76}/g) || [];
-      emailLines.push(...bodyLines);
+      // Use for loop instead of spread to avoid stack overflow on large content
+      for (const line of bodyLines) {
+        emailLines.push(line);
+      }
     }
 
     return Buffer.from(emailLines.join('\r\n')).toString('base64');
@@ -1372,8 +1381,7 @@ export class GmailService {
           const msg = await gmail.users.messages.get({
             userId: 'me',
             id: msgId,
-            format: 'metadata',
-            metadataHeaders: ['From', 'To', 'Subject', 'Date'],
+            format: 'full', // Changed from 'metadata' to store full email body
           });
           changedEmails.push({
             id: msg.data.id,
@@ -1476,8 +1484,7 @@ export class GmailService {
                   const msg = await gmail.users.messages.get({
                     userId: 'me',
                     id: message.id,
-                    format: 'metadata',
-                    metadataHeaders: ['From', 'To', 'Subject', 'Date'],
+                    format: 'full', // Changed from 'metadata' to store full email body
                   });
                   const emailId = msg.data.id;
                   if (typeof emailId === 'string' && emailId.length > 0) {

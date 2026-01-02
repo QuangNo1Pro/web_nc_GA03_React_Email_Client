@@ -21,7 +21,7 @@ export class UsersService {
     @InjectModel('Email') private emailModel: Model<EmailDocument>,
     private readonly embeddingsService: EmbeddingsService,
     private readonly configService: ConfigService,
-  ) {}
+  ) { }
 
   async findByEmail(email: string): Promise<UserDocument | null> {
     return this.userModel.findOne({ email }).exec();
@@ -248,29 +248,35 @@ export class UsersService {
 
   // ---------- EMAIL ----------
   async saveEmails(userId: string, emails: any[]) {
-    const ops = emails.map((email) => ({
-      updateOne: {
-        filter: { userId, messageId: email.id },
-        update: {
-          $set: {
-            userId,
-            messageId: email.id,
-            snippet: email.snippet,
-            labelIds: email.labelIds || [],
-            payload: email.payload,
-            internalDate: email.internalDate,
+    const ops = emails.map((email) => {
+      // Extract text content from payload for easy reading
+      const textContent = this.extractTextContent(email);
+
+      return {
+        updateOne: {
+          filter: { userId, messageId: email.id },
+          update: {
+            $set: {
+              userId,
+              messageId: email.id,
+              snippet: email.snippet,
+              labelIds: email.labelIds || [],
+              payload: email.payload,
+              internalDate: email.internalDate,
+              textContent, // Full text content for easy reading
+            },
+            // Use $setOnInsert to preserve status/snooze fields if they already exist
+            $setOnInsert: {
+              status: 'Inbox',
+              snoozed: false,
+              snoozedUntil: null,
+              snoozedFromStatus: null,
+            },
           },
-          // Use $setOnInsert to preserve status/snooze fields if they already exist
-          $setOnInsert: {
-            status: 'Inbox',
-            snoozed: false,
-            snoozedUntil: null,
-            snoozedFromStatus: null,
-          },
+          upsert: true,
         },
-        upsert: true,
-      },
-    }));
+      };
+    });
     const res = await this.emailModel.bulkWrite(ops);
 
     // After saving emails, generate embeddings for emails without embeddings (async best-effort)
@@ -301,6 +307,45 @@ export class UsersService {
     }
 
     return res;
+  }
+
+  /**
+   * Extract full text content from email payload for easy reading
+   */
+  private extractTextContent(email: any): string {
+    try {
+      const parts = email.payload?.parts || [];
+      let body = '';
+
+      // Try text/plain first
+      const textPart = parts.find((p: any) => p.mimeType === 'text/plain');
+      if (textPart?.body?.data) {
+        body = Buffer.from(textPart.body.data, 'base64').toString('utf-8');
+      } else {
+        // Fallback: extract from HTML and strip tags
+        const htmlPart = parts.find((p: any) => p.mimeType?.includes('html'));
+        if (htmlPart?.body?.data) {
+          let html = Buffer.from(htmlPart.body.data, 'base64').toString('utf-8');
+          // Remove style and script tags with content
+          html = html.replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '');
+          html = html.replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '');
+          // Remove HTML tags
+          body = html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+        } else if (email.payload?.body?.data) {
+          // Simple email without parts
+          body = Buffer.from(email.payload.body.data, 'base64').toString('utf-8');
+        }
+      }
+
+      // Fallback to snippet
+      if (!body || body.trim().length === 0) {
+        body = email.snippet || '';
+      }
+
+      return body.trim();
+    } catch (e) {
+      return email.snippet || '';
+    }
   }
 
   private getTextForEmbedding(email: any): string {
@@ -435,7 +480,7 @@ export class UsersService {
   }
 
   // ========== FEATURE III: SNOOZE OPERATIONS ==========
-  
+
   /**
    * Find email by messageId for snooze operations
    */
@@ -513,7 +558,7 @@ export class UsersService {
    */
   async updateSnoozeTime(userId: string, messageId: string, newSnoozedUntil: Date) {
     const email = await this.emailModel.findOne({ userId, messageId }).exec();
-    
+
     if (!email) {
       throw new Error('Email not found');
     }
@@ -574,7 +619,7 @@ export class UsersService {
   }
 
   // ========== KANBAN CONFIGURATION ==========
-  
+
   /**
    * Get user's Kanban column configuration
    */
