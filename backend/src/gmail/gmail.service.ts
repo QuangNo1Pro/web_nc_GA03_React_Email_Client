@@ -529,7 +529,9 @@ export class GmailService {
     // Email is archived if NOT in INBOX and NOT in system folders
     if (!labelIds.includes('INBOX') &&
       !labelIds.includes('TRASH') &&
-      !labelIds.includes('SPAM')) {
+      !labelIds.includes('SPAM') &&
+      !labelIds.includes('SENT') && // Exclude SENT emails
+      !labelIds.includes('DRAFT')) {
       console.log('[inferStatus] Done (archived):', labelIds);
       return 'Done';
     }
@@ -651,13 +653,34 @@ export class GmailService {
         // If auth error, we'll still try to update DB
       }
 
-      const email = await this.usersService.getEmailById(userId, messageId);
+      const emailFromDb = await this.usersService.getEmailById(userId, messageId);
 
-      // Check if email is in TRASH
-      const isInTrash = email && email.labelIds && email.labelIds.includes('TRASH');
+      let isInTrash = false;
+
+      // CRITICAL FIX: Verify TRASH status from Gmail API first
+      // Do not rely solely on DB as it might be out of sync
+      if (!authError && gmail) {
+        try {
+          const msg = await gmail.users.messages.get({
+            userId: 'me',
+            id: messageId,
+            format: 'metadata',
+            metadataHeaders: ['labelIds'],
+          });
+          isInTrash = msg.data.labelIds?.includes('TRASH') || false;
+          console.log(`[deleteEmail] Checked Gmail status for ${messageId}: isInTrash=${isInTrash}`);
+        } catch (err: any) {
+          console.warn(`[deleteEmail] Failed to check Gmail status for ${messageId}, falling back to DB:`, err.message);
+          // Fallback to DB
+          isInTrash = !!(emailFromDb && emailFromDb.labelIds && emailFromDb.labelIds.includes('TRASH'));
+        }
+      } else {
+        // Fallback to DB if no Gmail client
+        isInTrash = !!(emailFromDb && emailFromDb.labelIds && emailFromDb.labelIds.includes('TRASH'));
+      }
 
       if (isInTrash) {
-        // Nếu đã ở TRASH, xóa vĩnh viễn
+        // Nếu đã ở TRASH (xác nhận từ Gmail), xóa vĩnh viễn
         if (!authError && gmail) {
           try {
             await gmail.users.messages.delete({
@@ -710,11 +733,11 @@ export class GmailService {
         }
 
         // Cập nhật labelIds trong database
-        if (email && email.labelIds) {
+        if (emailFromDb && emailFromDb.labelIds) {
           const systemLabels = [
             'INBOX', 'SENT', 'STARRED', 'DRAFT', 'SPAM', 'IMPORTANT', 'UNREAD', 'CATEGORY_PERSONAL', 'CATEGORY_SOCIAL', 'CATEGORY_PROMOTIONS', 'CATEGORY_UPDATES', 'CATEGORY_FORUMS', 'ALL_MAIL'
           ];
-          let updatedLabels = email.labelIds.filter(label => !systemLabels.includes(label));
+          let updatedLabels = emailFromDb.labelIds.filter(label => !systemLabels.includes(label));
           updatedLabels = updatedLabels.filter(label => label !== 'TRASH');
           updatedLabels.push('TRASH');
           await this.usersService.updateEmailLabels(userId, messageId, updatedLabels);
@@ -774,6 +797,69 @@ export class GmailService {
       }
       console.error('Error archiving email:', error);
       throw new InternalServerErrorException('Failed to archive email');
+    }
+  }
+
+  /**
+   * Get archived emails (emails not in INBOX, TRASH, SPAM, DRAFT)
+   * Uses Gmail search query: -in:inbox -in:spam -in:trash -in:draft
+   */
+  async getArchivedEmails(userId: string, maxResults: number = 50) {
+    try {
+      const gmail = await this.getGmailClient(userId);
+
+      console.log('[getArchivedEmails] Fetching archived emails...');
+
+      // Use Gmail search to find archived emails
+      // Archived = not in inbox, spam, trash, draft, or sent
+      const res = await gmail.users.messages.list({
+        userId: 'me',
+        q: '-in:inbox -in:spam -in:trash -in:draft -in:sent',
+        maxResults,
+      });
+
+      if (!res.data.messages) {
+        console.log('[getArchivedEmails] No archived emails found');
+        return { messages: [] };
+      }
+
+      console.log(`[getArchivedEmails] Found ${res.data.messages.length} archived emails`);
+
+      // Fetch message details
+      const messages = await Promise.allSettled(
+        res.data.messages.map(async (message) => {
+          if (!message.id) return null;
+          try {
+            const msg = await gmail.users.messages.get({
+              userId: 'me',
+              id: message.id,
+              format: 'metadata',
+              metadataHeaders: ['From', 'To', 'Subject', 'Date'],
+            });
+            return {
+              id: msg.data.id,
+              snippet: msg.data.snippet,
+              payload: msg.data.payload,
+              labelIds: msg.data.labelIds,
+              internalDate: msg.data.internalDate,
+              status: 'Done', // Archived emails go to Done column
+            };
+          } catch (err) {
+            console.warn(`Failed to get archived email ${message.id}:`, (err as any)?.message);
+            return null;
+          }
+        })
+      );
+
+      const validMessages = messages
+        .filter(result => result.status === 'fulfilled' && result.value !== null)
+        .map(result => (result as PromiseFulfilledResult<any>).value);
+
+      console.log(`[getArchivedEmails] Returning ${validMessages.length} archived emails`);
+      return { messages: validMessages };
+    } catch (error: any) {
+      console.error('[getArchivedEmails] Error:', error.message);
+      return { messages: [] };
     }
   }
 
@@ -1238,7 +1324,10 @@ export class GmailService {
       // Encode body as base64 for proper UTF-8 handling
       const bodyBase64 = Buffer.from(body, 'utf-8').toString('base64');
       const bodyLines = bodyBase64.match(/.{1,76}/g) || [];
-      emailLines.push(...bodyLines);
+      // Use concat instead of spread to avoid stack overflow on large content
+      for (const line of bodyLines) {
+        emailLines.push(line);
+      }
       emailLines.push('');
 
       attachments.forEach((attachment) => {
@@ -1250,7 +1339,10 @@ export class GmailService {
 
         // Split base64 content into 76-character lines (RFC 2045)
         const base64Lines = attachment.base64Content.match(/.{1,76}/g) || [];
-        emailLines.push(...base64Lines);
+        // Use for loop instead of spread to avoid stack overflow on large files
+        for (const line of base64Lines) {
+          emailLines.push(line);
+        }
         emailLines.push('');
       });
 
@@ -1264,7 +1356,10 @@ export class GmailService {
       // Encode body as base64 for UTF-8
       const bodyBase64 = Buffer.from(body, 'utf-8').toString('base64');
       const bodyLines = bodyBase64.match(/.{1,76}/g) || [];
-      emailLines.push(...bodyLines);
+      // Use for loop instead of spread to avoid stack overflow on large content
+      for (const line of bodyLines) {
+        emailLines.push(line);
+      }
     }
 
     return Buffer.from(emailLines.join('\r\n')).toString('base64');
@@ -1300,6 +1395,22 @@ export class GmailService {
       id: attachmentId,
     });
     return res.data;
+  }
+
+  private sanitizePayload(payload: any): any {
+    if (!payload) return payload;
+    const sanitized = { ...payload };
+
+    // Limit body.data size to 2MB to prevent MongoDB 16MB limit errors
+    if (sanitized.body && sanitized.body.data && sanitized.body.data.length > 2 * 1024 * 1024) {
+      console.warn(`[GmailService] Truncating large body payload (${sanitized.body.data.length} chars)`);
+      sanitized.body.data = sanitized.body.data.substring(0, 2 * 1024 * 1024);
+    }
+
+    if (sanitized.parts) {
+      sanitized.parts = sanitized.parts.map((part: any) => this.sanitizePayload(part));
+    }
+    return sanitized;
   }
 
   async incrementalSync(userId: string) {
@@ -1372,13 +1483,12 @@ export class GmailService {
           const msg = await gmail.users.messages.get({
             userId: 'me',
             id: msgId,
-            format: 'metadata',
-            metadataHeaders: ['From', 'To', 'Subject', 'Date'],
+            format: 'full', // Changed from 'metadata' to store full email body
           });
           changedEmails.push({
             id: msg.data.id,
             snippet: msg.data.snippet,
-            payload: msg.data.payload,
+            payload: this.sanitizePayload(msg.data.payload),
             labelIds: msg.data.labelIds || [],
             internalDate: msg.data.internalDate,
           });
@@ -1476,8 +1586,7 @@ export class GmailService {
                   const msg = await gmail.users.messages.get({
                     userId: 'me',
                     id: message.id,
-                    format: 'metadata',
-                    metadataHeaders: ['From', 'To', 'Subject', 'Date'],
+                    format: 'full', // Changed from 'metadata' to store full email body
                   });
                   const emailId = msg.data.id;
                   if (typeof emailId === 'string' && emailId.length > 0) {
@@ -1486,7 +1595,7 @@ export class GmailService {
                       emailMap[emailId] = {
                         id: emailId,
                         snippet: msg.data.snippet,
-                        payload: msg.data.payload,
+                        payload: this.sanitizePayload(msg.data.payload),
                         labelIds: msg.data.labelIds || [],
                         internalDate: msg.data.internalDate,
                       };

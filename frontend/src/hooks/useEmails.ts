@@ -16,6 +16,7 @@ import { KanbanColumnConfig, DEFAULT_COLUMNS } from '../utils/kanbanConstants';
 /**
  * Fetch all emails from backend for Kanban view
  * Dynamically fetch from labels based on column configuration
+ * Also fetches archived emails for Done column
  * @param columnLabels - Array of Gmail labels to fetch from (derived from columns)
  */
 const fetchAllEmails = async (columnLabels: string[] = []): Promise<Email[]> => {
@@ -26,7 +27,7 @@ const fetchAllEmails = async (columnLabels: string[] = []): Promise<Email[]> => 
     // Combine with column-specific labels (SPAM, TRASH, etc)
     const allLabels = [...new Set([...baseLabels, ...columnLabels])];
 
-    // Filter out ARCHIVED as it's not a real Gmail label
+    // Filter out ARCHIVED as it's not a real Gmail label - we fetch it separately
     const labelsToFetch = allLabels.filter(l => l !== 'ARCHIVED');
 
     console.log('[fetchAllEmails] Fetching from labels:', labelsToFetch);
@@ -38,6 +39,17 @@ const fetchAllEmails = async (columnLabels: string[] = []): Promise<Email[]> => 
         return { data: { messages: [] } };
       })
     );
+
+    // Also fetch archived emails if ARCHIVED is in column config
+    const needsArchived = columnLabels.includes('ARCHIVED');
+    let archivedPromise: Promise<any> | null = null;
+    if (needsArchived) {
+      console.log('[fetchAllEmails] Fetching archived emails...');
+      archivedPromise = api.get('/gmail/emails/archived?limit=150').catch(err => {
+        console.warn('[fetchAllEmails] Failed to fetch archived:', err.message);
+        return { data: { messages: [] } };
+      });
+    }
 
     const results = await Promise.allSettled(fetchPromises);
 
@@ -55,6 +67,15 @@ const fetchAllEmails = async (columnLabels: string[] = []): Promise<Email[]> => 
         emailsByLabel[label] = [];
       }
     });
+
+    // Add archived emails if fetched
+    if (archivedPromise) {
+      const archivedResult = await archivedPromise;
+      const archivedEmails = archivedResult.data?.messages || [];
+      emailsByLabel['ARCHIVED'] = archivedEmails;
+      allEmails = [...allEmails, ...archivedEmails];
+      console.log(`[fetchAllEmails] Got ${archivedEmails.length} archived emails`);
+    }
 
     // Log counts per label
     const labelCounts = Object.entries(emailsByLabel)
@@ -122,12 +143,13 @@ const inferEmailStatus = (email: Email): EmailStatus => {
     return 'To Do';
   }
 
-  // PRIORITY 3: Done (Archived - not in INBOX, not in TRASH/SPAM)
+  // PRIORITY 3: Done (Archived - not in INBOX, not in TRASH/SPAM, not in SENT)
   // NOTE: These emails won't appear unless we fetch from non-INBOX sources
   if (!labels.includes('INBOX') &&
     !labels.includes('TRASH') &&
     !labels.includes('SPAM') &&
-    !labels.includes('DRAFT')) {
+    !labels.includes('DRAFT') &&
+    !labels.includes('SENT')) {
     console.log(`[inferEmailStatus] Email ${email.id?.substring(0, 8)} → Done (archived):`, labels);
     return 'Done';
   }
@@ -152,20 +174,25 @@ export const KANBAN_COLUMNS: Array<{ id: EmailStatus; title: string; color: stri
  * Infer email status based on dynamic column configuration
  * Uses Gmail labels to determine which column an email belongs to
  * 
- * Priority order:
+ * Priority order (ensures no duplicate display):
  * 1. TRASH - emails in trash folder
  * 2. SPAM - emails in spam folder  
  * 3. ARCHIVED - emails not in INBOX (and not in TRASH/SPAM)
- * 4. IMPORTANT - in progress emails
- * 5. STARRED - to do emails
+ * 4. IMPORTANT - in progress emails (INBOX + IMPORTANT → only show in Important column)
+ * 5. STARRED - to do emails (INBOX + STARRED → only show in Starred column)
  * 6. Other labels
- * 7. INBOX - default inbox
+ * 7. INBOX - default inbox (only if NOT starred and NOT important)
+ * 
+ * RULE: If email has INBOX + STARRED or INBOX + IMPORTANT, 
+ * it will ONLY appear in Starred/Important column, NOT in Inbox column.
+ * This prevents duplicate display across columns.
  */
 const inferEmailStatusDynamic = (
   email: Email,
   columnConfig: KanbanColumnConfig[]
 ): EmailStatus => {
   const labels = email.labelIds || [];
+  const emailIdShort = email.id?.substring(0, 8) || 'unknown';
 
   // PRIORITY 1: TRASH - highest priority (explicit trash action)
   const trashColumn = columnConfig.find(col => col.gmailLabel === 'TRASH');
@@ -179,27 +206,49 @@ const inferEmailStatusDynamic = (
     return spamColumn.id;
   }
 
-  // PRIORITY 3: Archived (Done) - not in INBOX, TRASH, SPAM, DRAFT
+  // PRIORITY 3: Archived (Done) - not in INBOX, TRASH, SPAM, DRAFT, SENT
   const archivedColumn = columnConfig.find(col => col.gmailLabel === 'ARCHIVED');
   if (archivedColumn) {
     if (!labels.includes('INBOX') &&
       !labels.includes('TRASH') &&
       !labels.includes('SPAM') &&
-      !labels.includes('DRAFT')) {
+      !labels.includes('DRAFT') &&
+      !labels.includes('SENT')) {
       return archivedColumn.id;
     }
   }
 
   // PRIORITY 4: IMPORTANT (In Progress) - must also be in INBOX
+  // Email with INBOX + IMPORTANT will ONLY show here, NOT in Inbox column
   const importantColumn = columnConfig.find(col => col.gmailLabel === 'IMPORTANT');
-  if (importantColumn && labels.includes('IMPORTANT') && labels.includes('INBOX')) {
-    return importantColumn.id;
+  const hasImportant = labels.includes('IMPORTANT');
+  const hasInbox = labels.includes('INBOX');
+
+  if (hasImportant && hasInbox) {
+    if (importantColumn) {
+      console.log(`[inferStatus] ${emailIdShort} → ${importantColumn.id} (IMPORTANT+INBOX)`);
+      return importantColumn.id;
+    } else {
+      // IMPORTANT column doesn't exist, but email still shouldn't go to Inbox
+      // Skip to check STARRED, or fallback to first non-inbox column
+      console.log(`[inferStatus] ${emailIdShort} has IMPORTANT but no column mapped`);
+    }
   }
 
   // PRIORITY 5: STARRED (To Do) - must also be in INBOX
+  // Email with INBOX + STARRED will ONLY show here, NOT in Inbox column
   const starredColumn = columnConfig.find(col => col.gmailLabel === 'STARRED');
-  if (starredColumn && labels.includes('STARRED') && labels.includes('INBOX')) {
-    return starredColumn.id;
+  const hasStarred = labels.includes('STARRED');
+
+  if (hasStarred && hasInbox) {
+    if (starredColumn) {
+      console.log(`[inferStatus] ${emailIdShort} → ${starredColumn.id} (STARRED+INBOX)`);
+      return starredColumn.id;
+    } else {
+      // STARRED column doesn't exist, but email still shouldn't go to Inbox 
+      // to avoid appearing in both Inbox AND any starred-related view
+      console.log(`[inferStatus] ${emailIdShort} has STARRED but no column mapped`);
+    }
   }
 
   // PRIORITY 6: Other category labels (custom columns)
@@ -217,13 +266,38 @@ const inferEmailStatusDynamic = (
     }
   }
 
-  // PRIORITY 7: Inbox column (default - must have INBOX label)
+  // PRIORITY 7: Inbox column (default)
+  // CRITICAL: Only show in Inbox if:
+  // - Has INBOX label
+  // - Does NOT have STARRED or IMPORTANT labels
+  // - Is NOT a SENT-only email (SENT without INBOX should not appear)
   const inboxColumn = columnConfig.find(col => col.gmailLabel === 'INBOX');
-  if (inboxColumn && labels.includes('INBOX')) {
+  const hasSent = labels.includes('SENT');
+
+  // Skip SENT-only emails (emails you sent that aren't also in your inbox)
+  // SENT emails should NOT appear anywhere in Kanban
+  if (hasSent && !hasInbox) {
+    console.log(`[inferStatus] ${emailIdShort} EXCLUDED (SENT-only)`);
+    return '__EXCLUDE__' as EmailStatus; // Special marker to filter out
+  }
+
+  if (inboxColumn && hasInbox) {
+    // Prevent duplicate: if email has STARRED or IMPORTANT, don't put in Inbox
+    if (hasStarred || hasImportant) {
+      console.log(`[inferStatus] ${emailIdShort} SKIPPED from Inbox (has STARRED=${hasStarred}, IMPORTANT=${hasImportant})`);
+      // Return the appropriate column if exists, otherwise still skip Inbox
+      if (hasImportant && importantColumn) return importantColumn.id;
+      if (hasStarred && starredColumn) return starredColumn.id;
+      // If columns don't exist, use first non-inbox column or fallback
+      const fallbackCol = columnConfig.find(c => c.gmailLabel !== 'INBOX');
+      if (fallbackCol) return fallbackCol.id;
+    }
+    console.log(`[inferStatus] ${emailIdShort} → ${inboxColumn.id} (INBOX only)`);
     return inboxColumn.id;
   }
 
   // Fallback: first column
+  console.log(`[inferStatus] ${emailIdShort} → fallback to first column`);
   return columnConfig[0]?.id || 'Inbox';
 };
 
@@ -283,6 +357,12 @@ export const useEmails = (options: UseEmailsOptions = {}) => {
 
       // Use dynamic status inference
       const status = inferEmailStatusDynamic(email, columnConfig);
+
+      // Filter out excluded emails (e.g. SENT-only)
+      if (status === ('__EXCLUDE__' as EmailStatus)) {
+        return;
+      }
+
       const column = grouped.find(col => col.id === status);
       if (column) {
         column.emails.push(email);

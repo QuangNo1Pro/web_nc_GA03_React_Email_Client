@@ -30,23 +30,23 @@ const formatTimestamp = (timestamp: number): string => {
   const date = new Date(timestamp);
   const now = new Date();
   const isToday = date.toDateString() === now.toDateString();
-  
+
   if (isToday) {
     return date.toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' });
   }
-  
+
   const yesterday = new Date(now);
   yesterday.setDate(yesterday.getDate() - 1);
   if (date.toDateString() === yesterday.toDateString()) {
     return 'Yesterday';
   }
-  
+
   // Show "2 days ago" format for recent emails
   const daysAgo = Math.floor((now.getTime() - date.getTime()) / (1000 * 60 * 60 * 24));
   if (daysAgo < 7) {
     return `${daysAgo} days ago`;
   }
-  
+
   return date.toLocaleDateString('vi-VN', { month: 'short', day: 'numeric' });
 };
 
@@ -83,14 +83,14 @@ const EmailCard: React.FC<EmailCardProps> = ({ email, borderColor, onSnooze, onO
   const [showSnoozeModal, setShowSnoozeModal] = useState(false);
   const [isGeneratingSummary, setIsGeneratingSummary] = useState(false);
   const [localSummary, setLocalSummary] = useState(email.summary);
-  
+
   // Sync localSummary when email.summary changes (from cache update)
   useEffect(() => {
     if (email.summary && email.summary !== localSummary) {
       setLocalSummary(email.summary);
     }
   }, [email.summary]);
-  
+
   const avatarLetter = getAvatarLetter(email.sender);
   const senderName = getSenderName(email.sender);
   const timestamp = formatTimestamp(email.timestamp);
@@ -123,7 +123,7 @@ const EmailCard: React.FC<EmailCardProps> = ({ email, borderColor, onSnooze, onO
   // FEATURE IV: Generate summary for email using queue to prevent rate limiting
   const generateSummaryForEmail = async () => {
     if (isGeneratingSummary || localSummary) return;
-    
+
     setIsGeneratingSummary(true);
     try {
       // Add to queue instead of calling directly
@@ -131,9 +131,9 @@ const EmailCard: React.FC<EmailCardProps> = ({ email, borderColor, onSnooze, onO
         const result = await summarizeEmail(emailId);
         return result.summary;
       });
-      
+
       setLocalSummary(summary);
-      
+
       // Dispatch event to update cache globally
       window.dispatchEvent(new CustomEvent('email-summary-generated', {
         detail: { messageId: email.id, summary }
@@ -171,9 +171,8 @@ const EmailCard: React.FC<EmailCardProps> = ({ email, borderColor, onSnooze, onO
       style={style}
       {...attributes}
       {...listeners}
-      className={`bg-white rounded-lg shadow-sm hover:shadow-md transition-all mb-3 border-l-4 pl-1 ${borderColor} group ${
-        isDragging ? 'z-50' : ''
-      }`}
+      className={`bg-white rounded-lg shadow-sm hover:shadow-md transition-all mb-3 border-l-4 pl-1 ${borderColor} group ${isDragging ? 'z-50' : ''
+        }`}
       role="article"
       aria-label={`Email from ${senderName}: ${email.subject}`}
       aria-grabbed={isDragging}
@@ -228,7 +227,7 @@ const EmailCard: React.FC<EmailCardProps> = ({ email, borderColor, onSnooze, onO
                 </div>
               ) : localSummary ? (
                 /* AI Summary - scrollable */
-                <div 
+                <div
                   className="text-sm text-gray-700 leading-relaxed max-h-32 overflow-y-auto pr-2 custom-scrollbar"
                   style={{
                     wordBreak: 'break-word',

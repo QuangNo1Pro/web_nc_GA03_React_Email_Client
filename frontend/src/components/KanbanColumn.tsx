@@ -33,9 +33,8 @@ const KanbanColumn: React.FC<KanbanColumnProps> = ({ column, onSnooze, onOpenEma
   return (
     <div
       ref={setNodeRef}
-      className={`flex flex-col bg-gray-50 rounded-lg h-full transition-colors ${
-        isOver ? 'bg-blue-50 ring-2 ring-blue-400' : ''
-      }`}
+      className={`flex flex-col bg-gray-50 rounded-lg h-full min-h-0 transition-colors ${isOver ? 'bg-blue-50 ring-2 ring-blue-400' : ''
+        }`}
       style={{ minWidth: 0 }}
       role="region"
       aria-label={`${column.title} column with ${column.emails.length} emails`}
@@ -55,8 +54,7 @@ const KanbanColumn: React.FC<KanbanColumnProps> = ({ column, onSnooze, onOpenEma
 
       {/* Column Body: Scrollable Email Cards */}
       <div
-        className="flex-1 overflow-y-auto p-4 space-y-0"
-        style={{ maxHeight: 'calc(100vh - 180px)' }}
+        className="flex-1 overflow-y-auto p-4 space-y-0 min-h-0"
         tabIndex={0}
         role="list"
         aria-label={`${column.title} email list`}
@@ -71,8 +69,8 @@ const KanbanColumn: React.FC<KanbanColumnProps> = ({ column, onSnooze, onOpenEma
         ) : (
           column.emails.map((email) => (
             <div key={email.id} role="listitem">
-              <EmailCard 
-                email={email} 
+              <EmailCard
+                email={email}
                 borderColor={column.color}
                 onSnooze={onSnooze}
                 onOpenEmail={onOpenEmail}

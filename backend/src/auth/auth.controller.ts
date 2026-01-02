@@ -29,7 +29,7 @@ export class AuthController {
     @Inject(UsersService) private usersService: UsersService,
     @Inject(ImapService) private imapService: ImapService,
     @Inject(EncryptionService) private encryptionService: EncryptionService,
-  ) {}
+  ) { }
 
   @Post('register')
   @HttpCode(HttpStatus.CREATED)
@@ -48,7 +48,7 @@ export class AuthController {
   async login(@Request() req: any, @Res({ passthrough: true }) res: Response) {
     const tokens = await this.authService.login(req.user);
     const isProduction = process.env.NODE_ENV === 'production';
-    
+
     res.cookie('access_token', tokens.access_token, {
       httpOnly: true,
       secure: isProduction,
@@ -136,7 +136,7 @@ export class AuthController {
     // The user object is attached by the jwt-refresh.strategy
     const tokens = await this.authService.refreshToken(req.user);
     const isProduction = process.env.NODE_ENV === 'production';
-    
+
     res.cookie('access_token', tokens.access_token, {
       httpOnly: true,
       secure: isProduction,
@@ -154,7 +154,7 @@ export class AuthController {
 
   @UseGuards(AuthGuard('google'))
   @Get('google')
-  async googleAuth(@Request() req: any) {}
+  async googleAuth(@Request() req: any) { }
 
   @UseGuards(AuthGuard('google'))
   @Get('google/callback')
@@ -164,7 +164,7 @@ export class AuthController {
   ) {
     const tokens = await this.authService.googleLogin(req.user);
     const isProduction = process.env.NODE_ENV === 'production';
-    
+
     res.cookie('access_token', tokens.access_token, {
       httpOnly: true,
       secure: isProduction,
@@ -181,26 +181,11 @@ export class AuthController {
       path: '/',
       maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
     });
-    
-    // Send HTML page that will do the redirect after ensuring cookies are set
+
+    // Redirect to frontend /auth-callback with token in URL
+    // This ensures the token is passed even with cross-origin cookie restrictions
     const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
-    res.send(`
-      <!DOCTYPE html>
-      <html>
-        <head>
-          <title>Redirecting...</title>
-        </head>
-        <body>
-          <p>Đang xử lý đăng nhập...</p>
-          <script>
-            // Wait a bit to ensure cookies are processed
-            setTimeout(() => {
-              window.location.href = '${frontendUrl}/inbox';
-            }, 100);
-          </script>
-        </body>
-      </html>
-    `);
+    res.redirect(`${frontendUrl}/auth-callback?token=${tokens.access_token}`);
   }
 
   @UseGuards(AuthGuard('jwt'))
