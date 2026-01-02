@@ -97,7 +97,7 @@ export default function Inbox() {
   // 👉 State declarations - must be before effects that use them
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedMailbox, setSelectedMailbox] = useState('INBOX');
-  
+
   // 🔍 Fuzzy search state (F2)
   const [isSearching, setIsSearching] = useState(false);
   const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
@@ -113,7 +113,7 @@ export default function Inbox() {
 
   // === Real-time email sync via SSE ===
   const { isConnected: sseConnected } = useGmailSSE(true);
-  
+
   // Debug SSE connection
   useEffect(() => {
     console.log('[Inbox] SSE connection status:', sseConnected);
@@ -126,15 +126,15 @@ export default function Inbox() {
       if (event.detail?.action === 'unsnooze') {
         const { email, originalStatus } = event.detail;
         console.log(`[Inbox] 🔄 Refreshing due to unsnooze: ${email?.messageId} → ${originalStatus}`);
-        
+
         // Invalidate mailboxes to update counts
         queryClient.invalidateQueries({ queryKey: ['mailboxes'] });
-        
+
         // Invalidate current mailbox if it's the target
         if (selectedMailbox === originalStatus || selectedMailbox === 'INBOX') {
           queryClient.invalidateQueries({ queryKey: ['emails', selectedMailbox] });
         }
-        
+
         toast.success(`Email moved back to ${originalStatus}`);
       }
     };
@@ -213,7 +213,7 @@ export default function Inbox() {
             return { filename: file.name, mimeType: file.type, base64Content: base64 };
           })
         );
-        
+
         // Lưu hoặc update draft
         await saveDraft({
           to: composeTo,
@@ -224,11 +224,11 @@ export default function Inbox() {
           attachments: attachmentsBase64,
           draftId: editingDraftId || undefined, // Pass draftId nếu đang edit
         });
-        
+
         // Refresh draft mailbox to show new draft
         queryClient.invalidateQueries({ queryKey: ['emails', 'DRAFT'] });
         queryClient.invalidateQueries({ queryKey: ['mailboxes'] });
-        
+
         toast.success(editingDraftId ? 'Đã cập nhật thư nháp' : 'Đã lưu vào thư nháp');
       } catch (err) {
         console.error('Save draft error:', err);
@@ -454,11 +454,11 @@ export default function Inbox() {
    */
   const handleSearch = async (query: string) => {
     console.log('[Inbox] 🔍 handleSearch called with:', query, 'in mailbox:', selectedMailbox, 'mode:', searchMode);
-    
+
     // Check auth token status
     const token = localStorage.getItem('access_token');
-    console.log('[Inbox] 🔐 Token in localStorage:', token ? `Exists (${token.substring(0,20)}...)` : 'NOT FOUND');
-    
+    console.log('[Inbox] 🔐 Token in localStorage:', token ? `Exists (${token.substring(0, 20)}...)` : 'NOT FOUND');
+
     if (!query.trim()) {
       setIsInSearchMode(false);
       setSearchResults([]);
@@ -471,18 +471,18 @@ export default function Inbox() {
       setSearchError(null);
       setIsInSearchMode(true); // Set search mode immediately
       console.log('[Inbox] 📡 Calling', searchMode, 'search API with label:', selectedMailbox);
-      
+
       const response = searchMode === 'fuzzy'
         ? await searchEmails(query, {
-            limit: 50,
-            offset: 0,
-            label: selectedMailbox, // ✅ Filter by selected mailbox
-          })
+          limit: 50,
+          offset: 0,
+          label: selectedMailbox, // ✅ Filter by selected mailbox
+        })
         : await semanticSearchEmails(query, {
-            limit: 50,
-            offset: 0,
-            label: selectedMailbox, // ✅ Filter by selected mailbox
-          });
+          limit: 50,
+          offset: 0,
+          label: selectedMailbox, // ✅ Filter by selected mailbox
+        });
 
       console.log('🔍 Search results:', response.data.results);
       setSearchResults(response.data.results);
@@ -772,13 +772,13 @@ export default function Inbox() {
       try {
         // Fetch full email details to get body and attachments
         const { data: draftDetail } = await api.get(`/gmail/emails/${emailId}`);
-        
+
         // Extract recipients from headers
         const toHeader = draftDetail.headers?.To || emailObj.to || '';
         const ccHeader = draftDetail.headers?.Cc || emailObj.cc || '';
         const bccHeader = draftDetail.headers?.Bcc || emailObj.bcc || '';
         const subjectHeader = draftDetail.headers?.Subject || emailObj.subject || '';
-        
+
         setComposeTo(toHeader);
         setComposeCc(ccHeader);
         setComposeBcc(bccHeader);
@@ -991,13 +991,13 @@ export default function Inbox() {
       // Only invalidate mailboxes for count updates
       queryClient.invalidateQueries({ queryKey: ['mailboxes'] });
       queryClient.invalidateQueries({ queryKey: ['emails', selectedMailbox] });
-      
+
       if (isPermanent) {
         toast.success('Đã xóa vĩnh viễn.');
       } else {
         toast.success('Đã xóa email.');
       }
-      
+
       await handleRefresh(true);
     } catch (err: any) {
       console.error('Delete email error:', err);
@@ -1141,21 +1141,21 @@ export default function Inbox() {
 
   const handleReply = () => {
     if (!email) return;
-    
+
     // CRITICAL: Try multiple sources to get sender email
     // Priority: email.from (from headers) > email.sender (from list)
     const fromField = email.from || email.sender || '';
-    
+
     console.log('[Reply Debug] email.from:', email.from);
     console.log('[Reply Debug] email.sender:', email.sender);
     console.log('[Reply Debug] fromField:', fromField);
-    
+
     // Dùng extractEmails để lấy địa chỉ email thuần túy
     const senderEmails = extractEmails(fromField);
     console.log('[Reply Debug] Extracted emails:', senderEmails);
-    
+
     let senderEmail = senderEmails.length > 0 ? senderEmails[0] : '';
-    
+
     // FALLBACK: If extractEmails failed, check if email.to contains our email
     // This means WE sent the email, so reply to email.to instead
     if (!senderEmail && email.to) {
@@ -1165,15 +1165,15 @@ export default function Inbox() {
         console.log('[Reply Debug] Using email.to as fallback:', senderEmail);
       }
     }
-    
+
     console.log('[Reply Debug] Final senderEmail:', senderEmail);
-    
+
     setComposeTo(senderEmail);
     setComposeCc('');
     setComposeBcc('');
     setShowCc(false);
     setShowBcc(false);
-    
+
     // Xử lý subject với fallback
     const subject = email.subject || '(No Subject)';
     setComposeSubject(`Re: ${subject.replace(/^Re:\s*/i, '')}`);
@@ -1184,15 +1184,15 @@ export default function Inbox() {
 
   const handleReplyAll = () => {
     if (!email) return;
-    
+
     // Xử lý sender email với fallback
     const fromField = email.from || email.sender || '';
     const senderEmails = extractEmails(fromField);
     const senderEmail = senderEmails.length > 0 ? senderEmails[0] : '';
-    
+
     // Reply all: gửi cho người gửi + cc
     setComposeTo(senderEmail);
-    
+
     if (email.cc) {
       // Dùng extractEmails để lấy danh sách email thuần túy
       const ccEmails = extractEmails(email.cc);
@@ -1202,10 +1202,10 @@ export default function Inbox() {
       setComposeCc('');
       setShowCc(false);
     }
-    
+
     setComposeBcc('');
     setShowBcc(false);
-    
+
     // Xử lý subject với fallback
     const subject = email.subject || '(No Subject)';
     setComposeSubject(`Re: ${subject.replace(/^Re:\s*/i, '')}`);
@@ -1214,25 +1214,55 @@ export default function Inbox() {
     setShowComposeModal(true);
   };
 
-  const handleForward = () => {
+  const handleForward = async () => {
     if (!email) return;
-    
+
     setComposeTo('');
-    
+
     // Xử lý subject với fallback
     const subject = email.subject || '(No Subject)';
     setComposeSubject(`Fwd: ${subject.replace(/^Fwd:\s*/i, '')}`);
-    
+
     // Xử lý các field cho forwarded message với fallback
     const fromField = email.from || email.sender || 'Unknown';
     const dateValue = email.received || email.timestamp;
     const dateStr = dateValue ? new Date(dateValue).toLocaleString('vi-VN') : 'Unknown date';
     const toField = email.to || 'Unknown';
     const bodyContent = email.body || email.snippet || 'No content';
-    
+
     setComposeBody(
-      `\n\n--- Forwarded message ---\nFrom: ${fromField}\nDate: ${dateStr}\nSubject: ${subject}\nTo: ${toField}\n\n${bodyContent.replace(/<[^>]*>/g, '')}`
+      `<br><br>--- Forwarded message ---<br>From: ${fromField}<br>Date: ${dateStr}<br>Subject: ${subject}<br>To: ${toField}<br><br>${bodyContent}`
     );
+
+    // Download and attach original attachments
+    if (email.attachments && email.attachments.length > 0) {
+      toast.loading('Đang tải attachments...', { id: 'forward-attachments' });
+      try {
+        const attachmentFiles: File[] = [];
+        for (const attachment of email.attachments) {
+          try {
+            const { data } = await api.get(
+              `/gmail/attachments/${email.id}/${attachment.attachmentId}`
+            );
+            // Convert base64 to File
+            const b64 = data.data.replace(/-/g, '+').replace(/_/g, '/');
+            const blob = b64toBlob(b64, attachment.mimeType);
+            const file = new File([blob], attachment.filename, { type: attachment.mimeType });
+            attachmentFiles.push(file);
+          } catch (err) {
+            console.error(`Failed to download attachment ${attachment.filename}:`, err);
+          }
+        }
+        setComposeAttachments(attachmentFiles);
+        toast.success(`Đã tải ${attachmentFiles.length} attachments`, { id: 'forward-attachments' });
+      } catch (err) {
+        console.error('Failed to download attachments:', err);
+        toast.error('Không thể tải attachments', { id: 'forward-attachments' });
+      }
+    } else {
+      setComposeAttachments([]);
+    }
+
     setEditingDraftId(null);
     setShowComposeModal(true);
   };
@@ -1398,7 +1428,7 @@ export default function Inbox() {
                     {theme === 'light' ? 'Chế độ tối' : 'Chế độ sáng'}
                   </button>
 
-                   <button
+                  <button
                     className="w-full px-4 py-3 flex items-center gap-3 transition-all"
                     style={{ color: 'var(--text-primary)' }}
                     onClick={() => {
@@ -1513,7 +1543,7 @@ export default function Inbox() {
               />
             </div>
 
-            
+
 
             {/* ===== ACTION BAR ===== */}
             <div
@@ -1836,196 +1866,196 @@ export default function Inbox() {
                   }}
                 />
               ) : (
-              /* NORMAL INBOX MODE */
-              <>
-                {/* LOADING STATE: Show spinner when loading OR fetching without existing data */}
-                {emailsLoading || emailsFetching ? (
-                  // If fetching with existing data, show email list + refetch indicator
-                  // Otherwise show full loading spinner
-                  (emailsFetching && emails && emails.length > 0) ? (
-                    // Background refetch - show list with indicator
-                    <div className="relative h-full">
-                      
-                      <EmailList
-                        ref={emailListComponentRef}
-                        emails={paginatedEmails}
-                        selectedEmail={selectedEmail}
-                        selectedEmails={selectedEmails}
-                        starredState={starredState}
-                        readState={readState}
-                        showCheckboxes={showCheckboxes}
-                        handleToggleCheckbox={handleToggleCheckbox}
-                        handleEmailSelect={handleEmailSelect}
-                        handleToggleRead={handleToggleRead}
-                        handleToggleStar={handleToggleStar}
-                        focusedEmailIndex={focusedEmailIndex}
-                        user={user}
-                        listHeight={listHeight}
-                      />
-                    </div>
-                  ) : (
-                    // Initial load - show full spinner
-                    <div
-                      style={{
-                        display: 'flex',
-                        flexDirection: 'column',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        height: '100%',
-                        width: '100%',
-                        minHeight: '320px',
-                      }}
-                    >
-                      <div className="spinner" style={{ marginBottom: '16px' }} />
-                      <p style={{ fontSize: '14px', opacity: 0.7, textAlign: 'center' }}>Đang tải email...</p>
-                    </div>
-                  )
-                ) : 
-                /* ERROR STATE: Only show when NOT loading/fetching and there's an actual error */
-                emailsError ? (
-                  <div className="flex items-center justify-center h-full">
-                    <div className="text-center" style={{ color: 'var(--text-secondary)' }}>
-                      <div style={{ fontSize: '48px', marginBottom: '12px', opacity: 0.5 }}>
-                        <MaterialIcon name="error_outline" />
+                /* NORMAL INBOX MODE */
+                <>
+                  {/* LOADING STATE: Show spinner when loading OR fetching without existing data */}
+                  {emailsLoading || emailsFetching ? (
+                    // If fetching with existing data, show email list + refetch indicator
+                    // Otherwise show full loading spinner
+                    (emailsFetching && emails && emails.length > 0) ? (
+                      // Background refetch - show list with indicator
+                      <div className="relative h-full">
+
+                        <EmailList
+                          ref={emailListComponentRef}
+                          emails={paginatedEmails}
+                          selectedEmail={selectedEmail}
+                          selectedEmails={selectedEmails}
+                          starredState={starredState}
+                          readState={readState}
+                          showCheckboxes={showCheckboxes}
+                          handleToggleCheckbox={handleToggleCheckbox}
+                          handleEmailSelect={handleEmailSelect}
+                          handleToggleRead={handleToggleRead}
+                          handleToggleStar={handleToggleStar}
+                          focusedEmailIndex={focusedEmailIndex}
+                          user={user}
+                          listHeight={listHeight}
+                        />
                       </div>
-                      <p style={{ fontSize: '14px', fontWeight: 500 }}>Không thể tải email</p>
-                      <p style={{ fontSize: '12px', marginTop: '8px', opacity: 0.7 }}>
-                        Vui lòng thử lại sau
-                      </p>
-                    </div>
-                  </div>
-                ) : 
-                /* EMPTY MAILBOX: No emails at all after successful load */
-                !emails || emails.length === 0 ? (
-                  <div className="flex items-center justify-center h-full">
-                    <div className="text-center" style={{ color: 'var(--text-secondary)' }}>
-                      <div style={{ fontSize: '64px', marginBottom: '16px', opacity: 0.3 }}>
-                        <MaterialIcon name={
-                          selectedMailbox === 'DRAFT' ? 'draft' :
-                          selectedMailbox === 'SENT' ? 'send' :
-                          selectedMailbox === 'TRASH' ? 'delete' :
-                          selectedMailbox === 'SPAM' ? 'report' :
-                          'inbox'
-                        } />
+                    ) : (
+                      // Initial load - show full spinner
+                      <div
+                        style={{
+                          display: 'flex',
+                          flexDirection: 'column',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          height: '100%',
+                          width: '100%',
+                          minHeight: '320px',
+                        }}
+                      >
+                        <div className="spinner" style={{ marginBottom: '16px' }} />
+                        <p style={{ fontSize: '14px', opacity: 0.7, textAlign: 'center' }}>Đang tải email...</p>
                       </div>
-                      <p style={{ fontSize: '16px', fontWeight: 500 }}>
-                        Không có email nào trong {currentMailboxLabel}
-                      </p>
-                      <p style={{ fontSize: '13px', marginTop: '8px', opacity: 0.7 }}>
-                        {selectedMailbox === 'DRAFT' && 'Bắt đầu soạn thư nháp mới'}
-                        {selectedMailbox === 'SENT' && 'Chưa có email đã gửi'}
-                        {selectedMailbox === 'TRASH' && 'Thùng rác trống'}
-                        {selectedMailbox === 'SPAM' && 'Không có thư rác'}
-                        {selectedMailbox === 'INBOX' && 'Hộp thư đến trống'}
-                        {!['DRAFT', 'SENT', 'TRASH', 'SPAM', 'INBOX'].includes(selectedMailbox) && 'Thư mục trống'}
-                      </p>
-                    </div>
-                  </div>
-                ) : 
-                /* FILTERED EMPTY: Has emails but filter/search returned nothing */
-                paginatedEmails.length === 0 ? (
-                  <div className="flex items-center justify-center h-full">
-                    <div className="text-center" style={{ color: 'var(--text-secondary)' }}>
-                      <div style={{ fontSize: '64px', marginBottom: '16px', opacity: 0.3 }}>
-                        <MaterialIcon name="search" />
+                    )
+                  ) :
+                    /* ERROR STATE: Only show when NOT loading/fetching and there's an actual error */
+                    emailsError ? (
+                      <div className="flex items-center justify-center h-full">
+                        <div className="text-center" style={{ color: 'var(--text-secondary)' }}>
+                          <div style={{ fontSize: '48px', marginBottom: '12px', opacity: 0.5 }}>
+                            <MaterialIcon name="error_outline" />
+                          </div>
+                          <p style={{ fontSize: '14px', fontWeight: 500 }}>Không thể tải email</p>
+                          <p style={{ fontSize: '12px', marginTop: '8px', opacity: 0.7 }}>
+                            Vui lòng thử lại sau
+                          </p>
+                        </div>
                       </div>
-                      <p style={{ fontSize: '16px', fontWeight: 500 }}>
-                        Không tìm thấy email nào
-                      </p>
-                      <p style={{ fontSize: '13px', marginTop: '8px', opacity: 0.7 }}>
-                        Thử thay đổi bộ lọc hoặc từ khóa tìm kiếm
-                      </p>
-                    </div>
-                  </div>
-                ) : 
-                /* SUCCESS STATE: Display email list */
-                (
-                  <EmailList
-                    ref={emailListComponentRef}
-                    emails={paginatedEmails}
-                    selectedEmail={selectedEmail}
-                    selectedEmails={selectedEmails}
-                    starredState={starredState}
-                    readState={readState}
-                    showCheckboxes={showCheckboxes}
-                    handleToggleCheckbox={handleToggleCheckbox}
-                    handleEmailSelect={handleEmailSelect}
-                    handleToggleRead={handleToggleRead}
-                    handleToggleStar={handleToggleStar}
-                    focusedEmailIndex={focusedEmailIndex}
-                    user={user}
-                    listHeight={listHeight}
-                  />
-                )}
-              </>
+                    ) :
+                      /* EMPTY MAILBOX: No emails at all after successful load */
+                      !emails || emails.length === 0 ? (
+                        <div className="flex items-center justify-center h-full">
+                          <div className="text-center" style={{ color: 'var(--text-secondary)' }}>
+                            <div style={{ fontSize: '64px', marginBottom: '16px', opacity: 0.3 }}>
+                              <MaterialIcon name={
+                                selectedMailbox === 'DRAFT' ? 'draft' :
+                                  selectedMailbox === 'SENT' ? 'send' :
+                                    selectedMailbox === 'TRASH' ? 'delete' :
+                                      selectedMailbox === 'SPAM' ? 'report' :
+                                        'inbox'
+                              } />
+                            </div>
+                            <p style={{ fontSize: '16px', fontWeight: 500 }}>
+                              Không có email nào trong {currentMailboxLabel}
+                            </p>
+                            <p style={{ fontSize: '13px', marginTop: '8px', opacity: 0.7 }}>
+                              {selectedMailbox === 'DRAFT' && 'Bắt đầu soạn thư nháp mới'}
+                              {selectedMailbox === 'SENT' && 'Chưa có email đã gửi'}
+                              {selectedMailbox === 'TRASH' && 'Thùng rác trống'}
+                              {selectedMailbox === 'SPAM' && 'Không có thư rác'}
+                              {selectedMailbox === 'INBOX' && 'Hộp thư đến trống'}
+                              {!['DRAFT', 'SENT', 'TRASH', 'SPAM', 'INBOX'].includes(selectedMailbox) && 'Thư mục trống'}
+                            </p>
+                          </div>
+                        </div>
+                      ) :
+                        /* FILTERED EMPTY: Has emails but filter/search returned nothing */
+                        paginatedEmails.length === 0 ? (
+                          <div className="flex items-center justify-center h-full">
+                            <div className="text-center" style={{ color: 'var(--text-secondary)' }}>
+                              <div style={{ fontSize: '64px', marginBottom: '16px', opacity: 0.3 }}>
+                                <MaterialIcon name="search" />
+                              </div>
+                              <p style={{ fontSize: '16px', fontWeight: 500 }}>
+                                Không tìm thấy email nào
+                              </p>
+                              <p style={{ fontSize: '13px', marginTop: '8px', opacity: 0.7 }}>
+                                Thử thay đổi bộ lọc hoặc từ khóa tìm kiếm
+                              </p>
+                            </div>
+                          </div>
+                        ) :
+                          /* SUCCESS STATE: Display email list */
+                          (
+                            <EmailList
+                              ref={emailListComponentRef}
+                              emails={paginatedEmails}
+                              selectedEmail={selectedEmail}
+                              selectedEmails={selectedEmails}
+                              starredState={starredState}
+                              readState={readState}
+                              showCheckboxes={showCheckboxes}
+                              handleToggleCheckbox={handleToggleCheckbox}
+                              handleEmailSelect={handleEmailSelect}
+                              handleToggleRead={handleToggleRead}
+                              handleToggleStar={handleToggleStar}
+                              focusedEmailIndex={focusedEmailIndex}
+                              user={user}
+                              listHeight={listHeight}
+                            />
+                          )}
+                </>
               )}
             </div>
 
             {/* Pagination - only show in normal mode, not in search mode */}
             {!isInSearchMode && (
-            <div
-              className="flex items-center text-xs justify-end px-3 border-t "
-              style={{
-                color: 'var(--text-secondary)',
-                backgroundColor: 'var(--bg-primary)',
-                borderColor: 'var(--border-primary)',
-              }}
-            >
-              <span className="mr-4">
-                {filteredEmails.length === 0
-                  ? "0"
-                  : `${startIndex + 1}–${Math.min(
-                    startIndex + pageSize,
-                    filteredEmails.length
-                  )} trong ${filteredEmails.length}`}
-              </span>
-
-              <button
-                className="px-2 py-1.5 transition-all font-base text-gray-700 text-lg" // <-- text-lg tăng chữ
+              <div
+                className="flex items-center text-xs justify-end px-3 border-t "
                 style={{
-                  opacity: safeCurrentPage <= 1 ? 0.4 : 1,
-                  cursor: safeCurrentPage <= 1 ? 'not-allowed' : 'pointer',
-                }}
-                disabled={safeCurrentPage <= 1}
-                onClick={() => {
-                  setCurrentPage((p) => Math.max(1, p - 1));
-                  setFocusedEmailIndex(0);
-                }}
-                onMouseEnter={(e) => {
-                  if (safeCurrentPage > 1) {
-                    e.currentTarget.style.backgroundColor = 'var(--bg-hover)';
-                  }
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.backgroundColor = 'transparent';
+                  color: 'var(--text-secondary)',
+                  backgroundColor: 'var(--bg-primary)',
+                  borderColor: 'var(--border-primary)',
                 }}
               >
-                ‹
-              </button>
+                <span className="mr-4">
+                  {filteredEmails.length === 0
+                    ? "0"
+                    : `${startIndex + 1}–${Math.min(
+                      startIndex + pageSize,
+                      filteredEmails.length
+                    )} trong ${filteredEmails.length}`}
+                </span>
 
-              <button
-                className="ml-1.5 px-3 rounded-lg transition-all font-medium text-lg" // <-- text-lg tăng chữ
-                style={{
-                  opacity: safeCurrentPage >= totalPages ? 0.3 : 1,
-                  cursor: safeCurrentPage >= totalPages ? 'not-allowed' : 'pointer',
-                }}
-                disabled={safeCurrentPage >= totalPages}
-                onClick={() => {
-                  setCurrentPage((p) => Math.min(totalPages, p + 1));
-                  setFocusedEmailIndex(0);
-                }}
-                onMouseEnter={(e) => {
-                  if (safeCurrentPage < totalPages) {
-                    e.currentTarget.style.backgroundColor = 'var(--bg-hover)';
-                  }
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.backgroundColor = 'transparent';
-                }}
-              >
-                ›
-              </button>
-            </div>
+                <button
+                  className="px-2 py-1.5 transition-all font-base text-gray-700 text-lg" // <-- text-lg tăng chữ
+                  style={{
+                    opacity: safeCurrentPage <= 1 ? 0.4 : 1,
+                    cursor: safeCurrentPage <= 1 ? 'not-allowed' : 'pointer',
+                  }}
+                  disabled={safeCurrentPage <= 1}
+                  onClick={() => {
+                    setCurrentPage((p) => Math.max(1, p - 1));
+                    setFocusedEmailIndex(0);
+                  }}
+                  onMouseEnter={(e) => {
+                    if (safeCurrentPage > 1) {
+                      e.currentTarget.style.backgroundColor = 'var(--bg-hover)';
+                    }
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.backgroundColor = 'transparent';
+                  }}
+                >
+                  ‹
+                </button>
+
+                <button
+                  className="ml-1.5 px-3 rounded-lg transition-all font-medium text-lg" // <-- text-lg tăng chữ
+                  style={{
+                    opacity: safeCurrentPage >= totalPages ? 0.3 : 1,
+                    cursor: safeCurrentPage >= totalPages ? 'not-allowed' : 'pointer',
+                  }}
+                  disabled={safeCurrentPage >= totalPages}
+                  onClick={() => {
+                    setCurrentPage((p) => Math.min(totalPages, p + 1));
+                    setFocusedEmailIndex(0);
+                  }}
+                  onMouseEnter={(e) => {
+                    if (safeCurrentPage < totalPages) {
+                      e.currentTarget.style.backgroundColor = 'var(--bg-hover)';
+                    }
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.backgroundColor = 'transparent';
+                  }}
+                >
+                  ›
+                </button>
+              </div>
             )}
 
           </div>
