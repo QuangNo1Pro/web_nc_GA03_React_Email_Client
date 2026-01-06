@@ -22,6 +22,7 @@ export class EmbeddingsProcessorService {
 
   constructor(
     @InjectModel('Email') private emailModel: Model<any>,
+    @InjectModel('EmailVector') private emailVectorModel: Model<any>,
     private readonly embeddingsService: EmbeddingsService,
   ) { }
 
@@ -33,33 +34,30 @@ export class EmbeddingsProcessorService {
     try {
       this.logger.log(`[EmbeddingsProcessor] Starting for user ${userId}${emailIds ? ` (${emailIds.length} emails)` : ''}`);
 
-      // If specific emailIds provided, process those
-      // Otherwise, find emails without embeddings
-      let emailsToProcess;
+      let emailsToProcess: any[] = [];
 
       if (emailIds && emailIds.length > 0) {
         emailsToProcess = await this.emailModel
           .find({ userId, _id: { $in: emailIds } })
-          .select('_id messageId payload snippet')
+          .select('_id messageId payload snippet userId')
           .lean()
           .exec();
       } else {
-        // Find emails without embeddings OR with empty embedding arrays
-        // (limit to 50 per run to avoid overload)
-        emailsToProcess = await this.emailModel
-          .find({
-            userId,
-            $or: [
-              { embedding: { $exists: false } },
-              { embedding: null },
-              { embedding: [] },
-              { embedding: { $size: 0 } }
-            ]
-          })
-          .select('_id messageId payload snippet')
-          .limit(50)
-          .lean()
-          .exec();
+        // Find emails that do NOT have a corresponding entry in email_vectors
+        emailsToProcess = await this.emailModel.aggregate([
+          { $match: { userId } },
+          {
+            $lookup: {
+              from: 'email_vectors',
+              localField: 'messageId',
+              foreignField: 'messageId',
+              as: 'vector'
+            }
+          },
+          { $match: { vector: { $size: 0 } } }, // Filter where no vector found
+          { $limit: 50 },
+          { $project: { _id: 1, messageId: 1, payload: 1, snippet: 1, userId: 1 } }
+        ]);
       }
 
       if (emailsToProcess.length === 0) {
@@ -69,7 +67,7 @@ export class EmbeddingsProcessorService {
 
       this.logger.log(`[EmbeddingsProcessor] Processing ${emailsToProcess.length} emails for user ${userId}`);
 
-      // Process embeddings in parallel (max 5 at a time to avoid API rate limits)
+      // Process embeddings in parallel (max 5 at a time)
       const batchSize = 5;
       for (let i = 0; i < emailsToProcess.length; i += batchSize) {
         const batch = emailsToProcess.slice(i, i + batchSize);
@@ -87,7 +85,6 @@ export class EmbeddingsProcessorService {
       this.logger.log(`[EmbeddingsProcessor] ✅ Completed processing ${emailsToProcess.length} emails for user ${userId}`);
     } catch (error: any) {
       this.logger.error(`[EmbeddingsProcessor] Error: ${error instanceof Error ? error.message : String(error)}`);
-      // Don't throw - let the process continue. Embedding generation is optional.
     }
   }
 
@@ -108,24 +105,28 @@ export class EmbeddingsProcessorService {
       // Extract subject
       const subject = this.extractSubject(email.payload) || '';
 
-      // Extract full body (not just snippet) for better semantic understanding
+      // Extract sender
+      const sender = this.extractSender(email.payload) || '';
+
+      // Extract full body
       const fullBody = this.extractEmailBody(email.payload);
 
       // Use full body if available, fallback to snippet
       const body = fullBody || email.snippet || '';
 
-      // Limit to 2000 chars to avoid token limits (Gemini has 2048 token limit)
-      const truncatedBody = body.substring(0, 2000);
+      // Limit to 8000 chars
+      const truncatedBody = body.substring(0, 8000);
 
-      // Combine subject + body for embedding
-      const textToEmbed = `${subject} ${truncatedBody}`.trim();
+      // Combine Sender + Subject + Body for embedding
+      // Structured format helps the model understand context
+      const textToEmbed = `Sender: ${sender}\nSubject: ${subject}\n\n${truncatedBody}`.trim();
 
       if (!textToEmbed || textToEmbed.length < 5) {
         this.logger.warn(`[EmbeddingsProcessor] Skipping email ${emailId}: insufficient text`);
         return;
       }
 
-      this.logger.debug(`[EmbeddingsProcessor] Embedding text for ${emailId}: ${textToEmbed.length} chars (subject: ${subject.length}, body: ${truncatedBody.length})`);
+      this.logger.debug(`[EmbeddingsProcessor] Embedding text for ${emailId}: ${textToEmbed.length} chars (subject: ${subject.length})`);
 
       // Generate embedding
       const embedding = await this.embeddingsService.embedText(textToEmbed);
@@ -135,19 +136,24 @@ export class EmbeddingsProcessorService {
         return;
       }
 
-      // Debug: Log embedding details before saving
-      this.logger.debug(`[EmbeddingsProcessor] About to save embedding for ${emailId}: length=${embedding.length}, first 3 values=[${embedding.slice(0, 3).join(', ')}]`);
-
-      // Store embedding in database
-      await this.emailModel.updateOne(
-        { _id: email._id },
-        { $set: { embedding, embeddingGeneratedAt: new Date() } }
+      // Store in email_vectors collection
+      await this.emailVectorModel.findOneAndUpdate(
+        { userId: email.userId, messageId: email.messageId },
+        {
+          $set: {
+            userId: email.userId,
+            messageId: email.messageId,
+            embedding,
+            updatedAt: new Date()
+          },
+          $setOnInsert: { createdAt: new Date() }
+        },
+        { upsert: true, new: true }
       );
 
-      this.logger.debug(`[EmbeddingsProcessor] ✅ Generated embedding for email ${emailId} (${embedding.length}D)`);
+      this.logger.debug(`[EmbeddingsProcessor] ✅ Saved embedding to email_vectors for ${email.messageId}`);
     } catch (error: any) {
       this.logger.error(`[EmbeddingsProcessor] Error processing email ${emailId}: ${error.message}`);
-      // Don't rethrow - continue with next email
     } finally {
       this.processingQueue.delete(emailId);
     }
@@ -164,56 +170,73 @@ export class EmbeddingsProcessorService {
   }
 
   /**
+   * Extract sender from email payload headers
+   */
+  private extractSender(payload: any): string {
+    if (!payload) return '';
+    const headers = payload.headers || [];
+    const fromHeader = headers.find((h: any) => h.name === 'From');
+    if (!fromHeader) return '';
+
+    // Parse "Name <email>" format
+    const match = fromHeader.value.match(/^([^<]+)/);
+    return match ? match[1].trim() : fromHeader.value;
+  }
+
+  /**
    * Extract full email body from payload
    * Recursively extracts text from parts (text/plain or text/html)
+   */
+  /**
+   * Extract full email body from payload
+   * Recursively extracts text from parts (text/plain or text/html)
+   * Handles base64url decoding
    */
   private extractEmailBody(payload: any): string {
     if (!payload) return '';
 
-    // If payload has body.data directly
-    if (payload.body?.data) {
+    // Helper to decode base64url
+    const decodeBase64 = (data: string): string => {
+      if (!data) return '';
       try {
-        return Buffer.from(payload.body.data, 'base64').toString('utf-8');
+        // Replace base64url chars with standard base64 chars
+        const base64 = data.replace(/-/g, '+').replace(/_/g, '/');
+        // Decode
+        return Buffer.from(base64, 'base64').toString('utf-8');
       } catch (e) {
-        this.logger.warn('[EmbeddingsProcessor] Failed to decode body.data');
+        return '';
       }
+    };
+
+    let body = '';
+
+    // 1. Direct body.data (rare in multipart, common in simple msgs)
+    if (payload.body?.data) {
+      return decodeBase64(payload.body.data);
     }
 
-    // If payload has parts, recursively extract
+    // 2. Recursive parts traversal
     if (payload.parts && Array.isArray(payload.parts)) {
-      let textContent = '';
-
       for (const part of payload.parts) {
-        // Prioritize text/plain
         if (part.mimeType === 'text/plain' && part.body?.data) {
-          try {
-            const decoded = Buffer.from(part.body.data, 'base64').toString('utf-8');
-            textContent += decoded + ' ';
-          } catch (e) {
-            // Ignore decode errors
-          }
+          body += decodeBase64(part.body.data) + '\n';
         }
-        // Fallback to text/html
-        else if (part.mimeType === 'text/html' && part.body?.data && !textContent) {
-          try {
-            const decoded = Buffer.from(part.body.data, 'base64').toString('utf-8');
-            // Simple HTML tag removal (not perfect but good enough)
-            const stripped = decoded.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ');
-            textContent += stripped + ' ';
-          } catch (e) {
-            // Ignore decode errors
-          }
+        else if (part.mimeType === 'text/html' && part.body?.data) {
+          // If we haven't found plain text yet, or want to append content
+          // Usually getting plain text is enough, but some emails are HTML only
+          const html = decodeBase64(part.body.data);
+          // Strip tags for embedding
+          const text = html.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+          if (text) body += text + '\n';
         }
-        // Recursively check nested parts
         else if (part.parts) {
-          textContent += this.extractEmailBody(part) + ' ';
+          // Nested multipart/alternative or mixed
+          body += this.extractEmailBody(part) + '\n';
         }
       }
-
-      return textContent.trim();
     }
 
-    return '';
+    return body.trim();
   }
 
   /**

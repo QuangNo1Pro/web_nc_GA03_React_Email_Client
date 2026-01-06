@@ -42,8 +42,6 @@ export const EmailSchema = new Schema(
     summarizedAt: { type: Date, default: null },
     // Full text content extracted from HTML/plain for easy reading
     textContent: { type: String, default: null },
-    // Embeddings for semantic search (optional)
-    embedding: { type: [Number], default: null },
   },
   {
     timestamps: true,

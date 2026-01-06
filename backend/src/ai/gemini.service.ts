@@ -65,147 +65,75 @@ export class GeminiService implements OnModuleInit {
     // Không filter gì cả, lấy toàn bộ nội dung sau khi clean HTML
     const truncatedInput = cleanContent.slice(0, 15000);
     this.logger.log(`📏 After truncate: ${truncatedInput.length} chars`);
-    this.logger.log('\n--- NỘI DUNG GỬI CHO GEMINI ---');
+    this.logger.log('\n--- NỘI DUNG GỬI CHO GEMINI/CUSTOM AI ---');
     this.logger.log(truncatedInput.substring(0, 800) + '...\n');
 
-    // 1. Try Gemini AI via REST API
-    if (this.hasApiKey) {
+    // 0. Check for Custom AI Provider (Ngrok/Kaggle)
+    const customAiUrl = this.configService.get<string>('CUSTOM_AI_API_URL');
+    if (customAiUrl) {
+      this.logger.log(`🚀 Using Custom AI Provider at: ${customAiUrl}`);
       try {
         const prompt = `Hãy tóm tắt email sau đây bằng tiếng Việt trong 2-3 câu hoàn chỉnh.
+ 
+ Tiêu đề: ${subject}
+ 
+ Nội dung email:
+ ${truncatedInput}
+ 
+ Tóm tắt (viết đầy đủ, không cắt giữa câu):`;
 
-Tiêu đề: ${subject}
-
-Nội dung email:
-${truncatedInput}
-
-Tóm tắt (viết đầy đủ, không cắt giữa câu):`;
-
-        const response = await fetch(
-          `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${this.apiKey}`,
-          {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              contents: [{ parts: [{ text: prompt }] }],
-              generationConfig: {
-                temperature: 0.4,
-                topK: 40,
-                topP: 0.95,
-                maxOutputTokens: 500,
-              },
-            }),
-          }
-        );
+        const response = await fetch(customAiUrl, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'ngrok-skip-browser-warning': 'true',
+            'User-Agent': 'PostmanRuntime/7.26.8',
+            'Accept': '*/*',
+          },
+          body: JSON.stringify({
+            // Ollama format
+            model: "llama3.2",
+            prompt: prompt,
+            stream: false,
+            // Fallback for other AI providers
+            text: prompt,
+            input: prompt
+          }),
+        });
 
         if (response.ok) {
-          const data: any = await response.json();
+          const responseText = await response.text();
+          try {
+            const data: any = JSON.parse(responseText);
+            this.logger.debug(`Custom AI full response: ${JSON.stringify(data)}`);
 
-          // Log full response for debugging
-          this.logger.debug(`Gemini full response: ${JSON.stringify(data, null, 2)}`);
+            // Try to find the output in common fields
+            const summary = data.response || data.generated_text || data.output || data.text || (data.candidates && data.candidates[0]?.content);
 
-          const summary = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
-          const finishReason = data.candidates?.[0]?.finishReason;
-
-          if (summary) {
-            this.logger.log(`✅ Gemini AI Summary (${summary.length} chars, finish: ${finishReason}): "${summary}"`);
-            return summary;
-          } else {
-            this.logger.warn(`⚠️ Gemini returned empty summary. Finish reason: ${finishReason}. Full response: ${JSON.stringify(data).substring(0, 500)}`);
+            if (summary && typeof summary === 'string') {
+              this.logger.log(`✅ Custom AI Summary: "${summary.substring(0, 100)}..."`);
+              return summary.trim();
+            } else {
+              this.logger.warn(`⚠️ Custom AI returned unknown format: ${responseText.substring(0, 200)}`);
+              return 'Lỗi: Custom AI trả về định dạng không hỗ trợ.';
+            }
+          } catch (parseError) {
+            this.logger.error(`❌ Custom AI Parse Error: Response is not JSON. Likely an HTML error page.`);
+            this.logger.error(`Response content (first 500 chars): ${responseText.substring(0, 500)}`);
+            return 'Lỗi: Custom AI trả về HTML thay vì JSON (kiểm tra lại URL hoặc ngrok interstitial).';
           }
         } else {
-          const errorText = await response.text();
-          this.logger.warn(`⚠️ Gemini API error: ${response.status} - ${errorText}`);
+          const errText = await response.text();
+          this.logger.error(`❌ Custom AI API error: ${response.status} - ${errText}`);
+          return `Lỗi Custom AI: ${response.statusText} (Check logs for details)`;
         }
       } catch (error: any) {
-        this.logger.warn(`⚠️ Gemini API failed: ${error.message}`);
+        this.logger.error(`❌ Custom AI request failed: ${error.message}`);
+        return `Lỗi kết nối Custom AI: ${error.message}`;
       }
     }
 
-    // 2. Fallback Local
-    this.logger.log('⚠️  Using local summarization fallback');
-    const summary = this.localSummarize(truncatedInput, subject, maxLength);
-    this.logger.log('\n--- KẾT QUẢ LOCAL SUMMARY ---');
-    this.logger.log(`✅ Summary (${summary.length} chars):`);
-    this.logger.log(summary);
-    this.logger.log('========== KẾT THÚC TÓM TẮT ==========\n');
-    return summary;
-  }
-
-  private localSummarize(content: string, subject: string, maxLength: number): string {
-    // Clean up common footer patterns first
-    const cleanedContent = content
-      .split(/\n{2,}/)
-      .filter(paragraph => {
-        const lower = paragraph.toLowerCase();
-        return !lower.includes('unsubscribe') &&
-          !lower.includes('confidential') &&
-          !lower.includes('privacy policy') &&
-          !lower.includes('terms of service') &&
-          !lower.includes('intended for') &&
-          !lower.includes('legal notice') &&
-          paragraph.length > 30; // Skip very short paragraphs
-      })
-      .join('\n\n');
-
-    const sentences = cleanedContent
-      .split(/[.!?\n]+/)
-      .map(s => s.trim())
-      .filter(s => s.length > 30 && s.length < 400); // Filter reasonable sentences
-
-    if (sentences.length === 0) {
-      return `Email về ${subject}`;
-    }
-
-    // Score sentences based on relevance
-    const subjectKeywords = subject.toLowerCase().split(/\s+/).filter(w => w.length > 3);
-
-    const scoredSentences = sentences.map((s, index) => {
-      let score = 0;
-
-      // Prefer sentences near the beginning (first 5 sentences)
-      if (index < 5) {
-        score += (5 - index) * 50;
-      }
-
-      // Prefer medium-length sentences (50-250 chars)
-      if (s.length >= 50 && s.length <= 250) {
-        score += 100;
-      }
-
-      // Bonus for subject keyword matches
-      subjectKeywords.forEach(keyword => {
-        if (s.toLowerCase().includes(keyword)) {
-          score += 200;
-        }
-      });
-
-      // Penalty for very long sentences (likely not summaries)
-      if (s.length > 300) {
-        score -= 50;
-      }
-
-      return { text: s, score, index };
-    });
-
-    // Get top 2-3 sentences, maintain original order
-    const topSentences = scoredSentences
-      .sort((a, b) => b.score - a.score)
-      .slice(0, 3)
-      .sort((a, b) => a.index - b.index)
-      .map(s => s.text);
-
-    let summary = topSentences.join('. ');
-    if (!summary.endsWith('.')) {
-      summary += '.';
-    }
-
-    return summary;
-  }
-
-  // Hàm tiện ích cắt chuỗi đẹp
-  private enforceLength(text: string, maxLength: number): string {
-    if (text.length <= maxLength) return text;
-    return text.slice(0, maxLength - 3) + '...';
+    return null;
   }
 
   private stripHtml(html: string): string {
@@ -249,6 +177,12 @@ Tóm tắt (viết đầy đủ, không cắt giữa câu):`;
     text = text.replace(/^\s+|\s+$/gm, ''); // Trim each line
 
     return text.trim();
+  }
+
+  // Hàm tiện ích cắt chuỗi đẹp
+  private enforceLength(text: string, maxLength: number): string {
+    if (text.length <= maxLength) return text;
+    return text.slice(0, maxLength - 3) + '...';
   }
 
   /**
@@ -303,5 +237,76 @@ Now for the query "${query}", provide ONLY the related terms as a comma-separate
 
     // Fallback to original query
     return query;
+  }
+
+  /**
+   * 🏆 Rerank search results using Gemini
+   * This improves accuracy by asking the LLM to judge specific relevance
+   */
+  async rerankSearchResults(query: string, items: { id: string; content: string }[]): Promise<string[]> {
+    if (!this.hasApiKey || items.length === 0) return items.map(i => i.id);
+
+    try {
+      this.logger.log(`[Rerank] Reranking ${items.length} items for query "${query}"`);
+
+      // ⚠️ Critical: "Sort" instead of "Filter". We trust the vector search found good candidates.
+      // We just want to bubble the best ones to the top.
+      const prompt = `You are an expert search ranking system.
+Query: "${query}"
+
+Rank the following email snippets by relevance to the query. 
+Return a JSON array of the IDs in order of decreasing relevance (most relevant first).
+INCLUDE ALL ITEMS in the returned array. Do not exclude any items.
+
+Items:
+${items.map((item, index) => `${index + 1}. [ID: ${item.id}] Content: ${item.content.substring(0, 300)}...`).join('\n')}
+
+Return ONLY the JSON array of strings (e.g. ["id1", "id2"]). No markdown blocks.`;
+
+      const response = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${this.apiKey}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            contents: [{ parts: [{ text: prompt }] }],
+            generationConfig: {
+              temperature: 0.0, // Zero temp for max determinism
+              responseMimeType: "application/json"
+            },
+          }),
+        }
+      );
+
+      if (response.ok) {
+        const data: any = await response.json();
+        let rawText = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
+
+        if (rawText) {
+          try {
+            // 🧹 Sanitize: Remove markdown code blocks if present
+            rawText = rawText.replace(/```json\n?|\n?```/g, '').trim();
+
+            const rankedIds = JSON.parse(rawText);
+            if (Array.isArray(rankedIds) && rankedIds.length > 0) {
+              this.logger.log(`[Rerank] Success. Top result: ${rankedIds[0]}`);
+              return rankedIds;
+            } else {
+              this.logger.warn(`[Rerank] Received empty or invalid array. Falling back.`);
+            }
+          } catch (e) {
+            this.logger.warn(`[Rerank] Failed to parse JSON: ${rawText}`);
+          }
+        }
+      } else {
+        const err = await response.text();
+        this.logger.error(`[Rerank] API error: ${err}`);
+      }
+    } catch (error: any) {
+      this.logger.error(`[Rerank] Error: ${error.message}`);
+    }
+
+    // Fallback: return original order
+    return items.map(i => i.id);
   }
 }

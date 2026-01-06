@@ -1192,7 +1192,11 @@ export class GmailService {
 
     // Try direct body.data first
     if (email.payload?.body?.data) {
-      const decoded = Buffer.from(email.payload.body.data, 'base64').toString('utf-8');
+      // Handle Base64URL
+      const base64 = email.payload.body.data
+        .replace(/-/g, '+')
+        .replace(/_/g, '/');
+      const decoded = Buffer.from(base64, 'base64').toString('utf-8');
       bodyText = decoded;
     }
     // Try multipart (common for Gmail)
@@ -1222,8 +1226,13 @@ export class GmailService {
       }
 
       // Direct body data
-      if (part.body?.data) {
-        const decoded = Buffer.from(part.body.data, 'base64').toString('utf-8');
+      if (part.body && part.body.data) {
+        // Handle Base64URL (replace - with +, _ with /)
+        const base64 = part.body.data
+          .replace(/-/g, '+')
+          .replace(/_/g, '/');
+
+        const decoded = Buffer.from(base64, 'base64').toString('utf-8');
 
         if (part.mimeType === 'text/html') {
           htmlBody = decoded;

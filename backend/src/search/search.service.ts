@@ -34,6 +34,7 @@ export class SearchService {
 
   constructor(
     @InjectModel('Email') private emailModel: Model<Email>,
+    @InjectModel('EmailVector') private emailVectorModel: Model<any>,
     private readonly embeddingsService: EmbeddingsService,
     private readonly embeddingsProcessor: EmbeddingsProcessorService,
     private readonly geminiService: GeminiService,
@@ -78,7 +79,7 @@ export class SearchService {
 
       const emails = await this.emailModel
         .find(filter)
-        .select('messageId snippet body payload labelIds unread starred')
+        .select('messageId snippet textContent payload labelIds unread starred')
         .lean()
         .exec();
 
@@ -108,7 +109,7 @@ export class SearchService {
             { name: 'subject', weight: 0.7 }, // Subject quan trọng hơn
             { name: 'sender', weight: 0.6 },
             { name: 'snippet', weight: 0.4 },
-            { name: 'body', weight: 0.3 },
+            { name: 'textContent', weight: 0.3 }, // Search in full text content
           ],
           threshold: 0.4, // 🧪 0.4 = typo tolerance (0=exact, 1=loose)
           ignoreLocation: true,
@@ -157,7 +158,7 @@ export class SearchService {
   }
 
   /**
-   * Semantic search using vector embeddings stored on emails.embedding
+   * Semantic search using vector embeddings stored in email_vectors collection
    */
   async semanticSearch(
     userId: string,
@@ -167,7 +168,7 @@ export class SearchService {
     label?: string,
   ): Promise<{ total: number; results: SearchResult[] }> {
     try {
-      // 1. Load ALL emails for user (with and without embeddings)
+      // 1. Determine candidate emails based on filters (Label, etc.)
       const filter: any = { userId };
       if (label) {
         if (label === 'UNREAD') filter.unread = true;
@@ -175,108 +176,161 @@ export class SearchService {
         else if (label !== 'ALL_MAIL') filter.labelIds = { $in: [label] };
       }
 
-      const allEmails = await this.emailModel
+      // Fetch ONLY messageIds to minimize data transfer
+      const candidateEmails = await this.emailModel
         .find(filter)
-        .select('messageId snippet body payload embedding labelIds')
+        .select('messageId')
         .lean()
         .exec();
 
-      if (!allEmails || allEmails.length === 0) {
-        this.logger.warn(`[SemanticSearch] No emails found for user ${userId}`);
+      if (!candidateEmails || candidateEmails.length === 0) {
+        this.logger.warn(`[SemanticSearch] No emails found for user ${userId} with filter ${label || 'ALL'}`);
         return { total: 0, results: [] };
       }
 
-      // 2. Separate emails with and without embeddings
-      const emailsWithEmbeddings = allEmails.filter(e => e.embedding && Array.isArray(e.embedding));
-      const emailsWithoutEmbeddings = allEmails.filter(e => !e.embedding || !Array.isArray(e.embedding));
+      const candidateMessageIds = candidateEmails.map(e => e.messageId);
 
-      this.logger.log(`[SemanticSearch] User ${userId}, label="${label || 'ALL'}": ${emailsWithEmbeddings.length}/${allEmails.length} emails have embeddings`);
-
-      // 3. Auto-generate embeddings for emails that don't have them (async, non-blocking for first request)
-      if (emailsWithoutEmbeddings.length > 0) {
-        this.logger.log(`[SemanticSearch] Triggering background embedding generation for ${emailsWithoutEmbeddings.length} emails`);
-        // Fire and forget - don't wait for this
-        this.embeddingsProcessor.processEmailEmbeddings(
+      // 2. Fetch vectors for these candidates
+      const vectors = await this.emailVectorModel
+        .find({
           userId,
-          emailsWithoutEmbeddings.map(e => e._id?.toString()).filter(Boolean)
-        ).catch(err => {
-          this.logger.error(`[SemanticSearch] Background embedding generation failed: ${err.message}`);
-        });
+          messageId: { $in: candidateMessageIds }
+        })
+        .select('messageId embedding')
+        .lean()
+        .exec();
+
+      this.logger.log(`[SemanticSearch] User ${userId}, label="${label || 'ALL'}": Found ${vectors.length} vectors for ${candidateMessageIds.length} candidate emails`);
+
+      // 3. Trigger background generation for missing vectors
+      if (vectors.length < candidateMessageIds.length) {
+        const existingVectorIds = new Set(vectors.map(v => v.messageId));
+        const missingIds = candidateMessageIds.filter(id => !existingVectorIds.has(id));
+
+        if (missingIds.length > 0) {
+          this.logger.log(`[SemanticSearch] Triggering background embedding generation for ${missingIds.length} emails`);
+          // Use the internal IDs from candidateEmails to match what processEmailEmbeddings expects (which usually takes _id)
+          // But processEmailEmbeddings logic in previous step was updated to accept _id list.
+          // However, here we have messageIds.
+          // EmbeddingsProcessor expects _id list.
+          // Let's refactor processEmailEmbeddings or mapping.
+          // Actually, let's look at candidateEmails - it has _id (default).
+          const missingEmailDocs = candidateEmails.filter(e => !existingVectorIds.has(e.messageId));
+          const missingInternalIds = missingEmailDocs.map(e => e._id.toString());
+
+          this.embeddingsProcessor.processEmailEmbeddings(userId, missingInternalIds).catch(err => {
+            this.logger.error(`[SemanticSearch] Background embedding generation failed: ${err.message}`);
+          });
+        }
       }
 
-      // 4. If no emails have embeddings yet, return empty results with helpful message
-      if (emailsWithEmbeddings.length === 0) {
-        this.logger.warn(`[SemanticSearch] No emails with embeddings yet. Embeddings are being generated in the background. Please try again in a few moments.`);
+      if (vectors.length === 0) {
+        this.logger.warn(`[SemanticSearch] No embeddings found yet. Please try again later.`);
         return { total: 0, results: [] };
       }
 
-      // 5. Expand query with semantically related terms using AI
+      // 4. Expand query
       const expandedQuery = await this.geminiService.expandQuery(query);
-      const queryToEmbed = expandedQuery || query; // Fallback to original if expansion fails
-
+      const queryToEmbed = expandedQuery || query;
       this.logger.log(`[SemanticSearch] Query expansion: "${query}" → "${queryToEmbed}"`);
 
-      // 6. Generate embedding for the (expanded) query
+      // 5. Generate embedding for query
       const qEmbedding = await this.embeddingsService.embedText(queryToEmbed);
 
-      // 7. Helper functions for cosine similarity
+      // 6. Cosine Similarity
       const dot = (a: number[], b: number[]) => a.reduce((s, v, i) => s + v * (b[i] || 0), 0);
       const norm = (a: number[]) => Math.sqrt(a.reduce((s, v) => s + v * v, 0));
 
-      this.logger.debug(`[SemanticSearch] Query embedding: length=${qEmbedding.length}, first 3 values=[${qEmbedding.slice(0, 3).join(', ')}], norm=${norm(qEmbedding).toFixed(3)}`);
-
-      const scored = emailsWithEmbeddings.map((e, idx) => {
-        const emb = e.embedding as number[];
-
-        // Debug first email
-        if (idx === 0) {
-          this.logger.debug(`[SemanticSearch] First email embedding: length=${emb?.length || 0}, first 3 values=[${emb?.slice(0, 3).join(', ') || 'N/A'}], norm=${emb ? norm(emb).toFixed(3) : 'N/A'}`);
-        }
-
+      const scored = vectors.map((v) => {
+        const emb = v.embedding;
         const similarity = (emb && qEmbedding) ? (dot(emb, qEmbedding) / (norm(emb) * norm(qEmbedding))) : -1;
-        return { email: e, similarity: Number.isFinite(similarity) ? similarity : -1 };
+        return { messageId: v.messageId, similarity: Number.isFinite(similarity) ? similarity : -1 };
       });
 
+      // Sort
       scored.sort((a, b) => b.similarity - a.similarity);
 
-      // Log top 5 scores BEFORE filtering to see what we're getting
-      if (scored.length > 0) {
-        const topScoresAll = scored.slice(0, 5).map(s => s.similarity.toFixed(3)).join(', ');
-        this.logger.log(`[SemanticSearch] Top 5 similarities (unfiltered): [${topScoresAll}]`);
-      }
-
-      // Minimum similarity threshold for results (increased to 0.35 for high precision)
-      // Only show emails with strong semantic match
-      const MIN_SIMILARITY = 0.35; // Cosine similarity threshold (range: -1 to 1)
+      // Phase 1: High Recall Retrieval
+      // Lower threshold to catch more potential candidates (Recall)
+      const MIN_SIMILARITY = 0.25;
       const filtered = scored.filter(s => s.similarity >= MIN_SIMILARITY);
 
-      this.logger.log(`[SemanticSearch] Query "${query}": ${filtered.length}/${scored.length} results above threshold (${MIN_SIMILARITY})`);
+      this.logger.log(`[SemanticSearch] Recall Phase: "${query}" found ${filtered.length} candidates > ${MIN_SIMILARITY}`);
 
-      // Log top 5 similarity scores for debugging
-      if (filtered.length > 0) {
-        const topScores = filtered.slice(0, 5).map(s => s.similarity.toFixed(3)).join(', ');
-        this.logger.log(`[SemanticSearch] Top 5 similarities: [${topScores}]`);
+      // Take Top 50 for Reranking
+      const topCandidates = filtered.slice(0, 50);
+
+      // Fetch details for reranking
+      const candidateIds = topCandidates.map(c => c.messageId);
+      const emailDetails = await this.emailModel
+        .find({ userId, messageId: { $in: candidateIds } })
+        .select('messageId snippet payload')
+        .lean()
+        .exec();
+
+      const emailMap = new Map(emailDetails.map(e => [e.messageId, e]));
+
+      // Phase 2: AI Reranking (Precision)
+      // Prepare items for Gemini to rank
+      const rerankItems = topCandidates.map(c => {
+        const email = emailMap.get(c.messageId);
+        if (!email) return null;
+
+        const { subject, sender } = this.extractEmailInfo(email);
+        const content = `Sender: ${sender}\nSubject: ${subject}\nSnippet: ${email.snippet || ''}`;
+
+        return {
+          id: c.messageId,
+          content
+        };
+      }).filter(Boolean) as { id: string; content: string }[];
+      // Call reranker
+      const rankedIds = await this.geminiService.rerankSearchResults(query, rerankItems);
+      this.logger.log(`[SemanticSearch] Reranker returned ${rankedIds.length} sorted IDs`);
+
+      // Map back to results
+      const results: SearchResult[] = [];
+      const addedIds = new Set<string>();
+
+      // 1. Add ranked items first
+      for (const id of rankedIds) {
+        const email = emailMap.get(id);
+        const originalScore = topCandidates.find(c => c.messageId === id)?.similarity || 0;
+
+        if (email) {
+          const { sender, subject } = this.extractEmailInfo(email);
+          results.push({
+            id: email.messageId,
+            sender,
+            subject,
+            snippet: email.snippet || '',
+            score: 1 - ((originalScore + 1) / 2),
+            matchedFields: ['body', 'subject', 'semantic_rerank'],
+          });
+          addedIds.add(id);
+        }
       }
 
-      const total = filtered.length;
-      const page = filtered.slice(offset, offset + limit);
+      // 2. Add any remaining candidates that weren't in ranked list (Safety Fallback)
+      for (const candidate of topCandidates) {
+        if (!addedIds.has(candidate.messageId)) {
+          const email = emailMap.get(candidate.messageId);
+          if (email) {
+            const { sender, subject } = this.extractEmailInfo(email);
+            results.push({
+              id: email.messageId,
+              sender,
+              subject,
+              snippet: email.snippet || '',
+              score: 1 - ((candidate.similarity + 1) / 2),
+              matchedFields: ['body', 'subject'],
+            });
+          }
+        }
+      }
 
-      const results: SearchResult[] = page.map((s) => {
-        const sender = this.extractEmailInfo(s.email).sender;
-        const subject = this.extractEmailInfo(s.email).subject;
-        // Convert cosine (-1..1) -> score similar to existing format where 0 is perfect
-        const score = 1 - ((s.similarity + 1) / 2); // similarity 1 => score 0, similarity -1 => score 1
-        return {
-          id: s.email.messageId,
-          sender,
-          subject,
-          snippet: s.email.snippet || '',
-          score,
-          matchedFields: ['body', 'subject'],
-        };
-      });
-
-      return { total, results };
+      this.logger.log(`[SemanticSearch] Returning ${results.length} results`);
+      return { total: results.length, results: results.slice(offset, offset + limit) };
     } catch (error) {
       this.logger.error(`semanticSearch error: ${error instanceof Error ? error.message : String(error)}`);
       throw error;

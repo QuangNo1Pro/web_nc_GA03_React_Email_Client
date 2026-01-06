@@ -158,7 +158,7 @@ export function SearchBar({
   const handleSuggestionClick = (text: string) => {
     console.log('[SearchBar] 🔍 Clicked suggestion:', text);
     onSearch(text);
-    setQuery('');
+    setQuery(text);
     setSuggestions({ senders: [], subjects: [] });
     setShowSuggestions(false);
     setSelectedSuggestionIndex(-1);
@@ -172,9 +172,9 @@ export function SearchBar({
           <SearchModeSelector mode={searchMode} onChange={setSearchMode} size="sm" />
         </div>
       )}
-      
+
       {/* Search input */}
-      <div 
+      <div
         className="flex items-center gap-2 px-3 py-2 border rounded-lg focus-within:ring-2 focus-within:ring-blue-500"
         style={{
           backgroundColor: 'var(--bg-secondary)',
@@ -207,7 +207,7 @@ export function SearchBar({
               onSearch(query.trim());
             }}
             className="p-1 rounded transition-colors"
-            style={{ 
+            style={{
               color: 'var(--accent-primary)',
               backgroundColor: 'transparent',
             }}
@@ -228,7 +228,7 @@ export function SearchBar({
             onClick={handleClear}
             disabled={isLoading}
             className="p-1 rounded transition-colors"
-            style={{ 
+            style={{
               color: 'var(--text-tertiary)',
               backgroundColor: 'transparent',
             }}
@@ -244,7 +244,7 @@ export function SearchBar({
           </button>
         )}
         {(isLoading || loadingSuggestions) && (
-          <div 
+          <div
             className="w-4 h-4 rounded-full animate-spin"
             style={{
               border: '2px solid transparent',

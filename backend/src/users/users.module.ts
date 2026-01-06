@@ -4,6 +4,7 @@ import { UsersService } from './users.service';
 import { UserSchema } from './schemas/user.schema';
 import { MailboxSchema } from './schemas/mailbox.schema';
 import { EmailSchema } from './schemas/email.schema';
+import { EmailVectorSchema } from './schemas/email-vector.schema';
 import { AiModule } from '../ai/ai.module';
 
 @Module({
@@ -12,6 +13,7 @@ import { AiModule } from '../ai/ai.module';
       { name: 'User', schema: UserSchema },
       { name: 'Mailbox', schema: MailboxSchema },
       { name: 'Email', schema: EmailSchema },
+      { name: 'EmailVector', schema: EmailVectorSchema },
     ]),
     AiModule,
   ],
@@ -19,4 +21,4 @@ import { AiModule } from '../ai/ai.module';
   controllers: [],
   exports: [UsersService, MongooseModule],
 })
-export class UsersModule {}
+export class UsersModule { }
