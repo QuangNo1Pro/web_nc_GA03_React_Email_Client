@@ -2101,7 +2101,13 @@ export class GmailService {
       const summary = await this.geminiService.summarizeEmail(content, subject);
 
       if (!summary) {
-        throw new InternalServerErrorException('Failed to generate summary');
+        // Return a friendly error instead of throwing 500
+        const failureMessage = 'Hiện tại không thể tạo tóm tắt (AI quá tải hoặc không phản hồi). Vui lòng thử lại sau.';
+        return {
+          id: messageId,
+          summary: failureMessage,
+          summarizedAt: new Date().toISOString()
+        };
       }
 
       this.logger.log(`📄 Summary generated (${summary.length} chars): ${summary.substring(0, 100)}...`);
