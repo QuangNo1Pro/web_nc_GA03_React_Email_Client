@@ -15,7 +15,8 @@
 -   **Snooze/Deferral với đồng bộ Gmail:** Hoãn email với đồng bộ hoá 2 chiều với Gmail API (SNOOZED label).
 -   **Tự động đánh thức (Auto wake-up):** Scheduler backend kiểm tra mỗi phút để khôi phục email đã hết hạn.
 -   **Rollback tự động:** Nếu Gmail API thất bại, thay đổi local sẽ được hoàn tác tự động.
--   **AI Email Summarization:** Tóm tắt nội dung email tự động bằng Gemini AI với fallback local summarization.
+-   **AI Email Summarization:** Tóm tắt nội dung email tự động bằng Google Gemini 2.0 Flash. Hỗ trợ fallback sang mô hình Local Llama 3.2 (qua Ollama) khi Gemini gặp sự cố.
+-   **Semantic Search (Tìm kiếm ngữ nghĩa):** Tìm kiếm thông minh dựa trên ngữ nghĩa câu hỏi, sử dụng Vector Embeddings để phân tích nội dung email thay vì chỉ khớp từ khóa chính xác.
 -   **Bảo mật dựa trên Token:** Sử dụng access và refresh token JWT để giao tiếp API an toàn với proxy backend.
 -   **Tự động làm mới Token:** Tự động làm mới access token đã hết hạn mà không làm gián đoạn người dùng.
 -   **Giao diện Kanban hiện đại:** Giao diện người dùng email client tương thích, tương tác với drag & drop.
@@ -46,6 +47,33 @@
 -   **bcrypt:** Thư viện để mã hóa mật khẩu.
 -   **@nestjs/schedule:** Module scheduler cho NestJS để tự động đánh thức email đã snooze.
 -   **Gemini AI API:** Tích hợp Google Gemini 2.0 Flash cho tính năng tóm tắt email bằng AI.
+-   **Local AI (Ollama):** Hỗ trợ chạy model Llama 3.2 cục bộ thông qua Ollama và Ngrok làm fallback khi Gemini gặp sự cố.
+
+## Tóm tắt Email bằng AI (Llama 3.2 Local)
+
+Để sử dụng tính năng tóm tắt email bằng AI Local (thay vì Gemini), bạn cần chạy Ollama và Ngrok trên máy cá nhân.
+
+### 1. Cài đặt & Chạy Ollama
+1. Tải và cài đặt [Ollama](https://ollama.com).
+2. Mở Terminal và tải model Llama 3.2:
+   ```powershell
+   ollama run llama3.2
+   ```
+   *(Giữ cửa sổ này chạy ngầm)*.
+
+### 2. Cài đặt & Chạy Ngrok
+1. Tải và cài đặt [Ngrok](https://ngrok.com).
+2. Chạy lệnh sau để public Ollama ra Internet (quan trọng: phải có tham số `host-header` để tránh lỗi 403):
+   ```powershell
+   ngrok http 11434 --host-header="localhost:11434" --domain=delineable-maryanna-unvolubly.ngrok-free.dev
+   ```
+3. Cập nhật file `backend/.env`:
+   ```env
+   CUSTOM_AI_API_URL=https://delineable-maryanna-unvolubly.ngrok-free.dev/api/generate
+   ```
+
+### 3. Kiểm tra
+- Backend sẽ tự động chuyển sang dùng Custom AI nếu Gemini gặp lỗi (quota/rate limit) hoặc nếu bạn tắt Gemini API key.
 
 ## Bắt đầu
 
@@ -91,6 +119,7 @@
     ENCRYPTION_KEY=your_32_character_encryption_key_for_aes256
     BCRYPT_SALT_ROUNDS=10
     GEMINI_API_KEY=your_gemini_api_key_here
+    CUSTOM_AI_API_URL=https://delineable-maryanna-unvolubly.ngrok-free.dev/api/generate # Optional: Local AI Fallback URL
     ```
 4.  **Khởi động máy chủ phát triển:**
     ```sh
