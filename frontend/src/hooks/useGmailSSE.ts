@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import toast from 'react-hot-toast';
+import { useAuth } from '../auth/AuthContext';
+import { getAccessToken } from '../services/api';
 
 const API_URL = typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_API_URL
   ? import.meta.env.VITE_API_URL
@@ -18,14 +19,18 @@ interface SSEEvent {
  */
 export function useGmailSSE(enabled: boolean = true) {
   const queryClient = useQueryClient();
+  const { user, loading } = useAuth();
   const [isConnected, setIsConnected] = useState(false);
   const [reconnectAttempts, setReconnectAttempts] = useState(0);
   const reconnectTimeoutRef = useRef<number | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
-    if (!enabled) {
-      console.log('[SSE] Hook disabled, not connecting');
+    // Wait for auth loading to finish and user to be present
+    if (!enabled || loading || !user) {
+      if (!loading && !user) {
+        console.log('[SSE] User not authenticated, skipping connection');
+      }
       return;
     }
 
@@ -33,9 +38,32 @@ export function useGmailSSE(enabled: boolean = true) {
 
     let isMounted = true;
 
+    const scheduleReconnect = () => {
+      if (reconnectTimeoutRef.current) {
+        clearTimeout(reconnectTimeoutRef.current);
+      }
+
+      const delay = Math.min(1000 * Math.pow(2, reconnectAttempts), 30000);
+      console.log(`[SSE] Reconnecting in ${delay}ms (attempt ${reconnectAttempts + 1})`);
+
+      reconnectTimeoutRef.current = window.setTimeout(() => {
+        if (isMounted) {
+          setReconnectAttempts((prev) => prev + 1);
+          connect();
+        }
+      }, delay);
+    };
+
     const connect = () => {
       console.log('[SSE] 🔌 Connect function called');
-      
+
+      const token = getAccessToken();
+      if (!token) {
+        console.warn('[SSE] No access token available, skipping connection');
+        setIsConnected(false);
+        return;
+      }
+
       // Abort any existing connection
       if (abortControllerRef.current) {
         abortControllerRef.current.abort();
@@ -52,8 +80,9 @@ export function useGmailSSE(enabled: boolean = true) {
         headers: {
           'Accept': 'text/event-stream',
           'Cache-Control': 'no-cache',
+          'Authorization': `Bearer ${token}`,
         },
-        credentials: 'include', // ⚠️ CRITICAL: Send httpOnly cookies
+        credentials: 'include',
         signal: abortControllerRef.current.signal,
       })
         .then(async (response) => {
@@ -76,7 +105,7 @@ export function useGmailSSE(enabled: boolean = true) {
           // Read stream
           while (true) {
             const { done, value } = await reader.read();
-            
+
             if (done) {
               console.log('[SSE] Stream ended');
               setIsConnected(false);
@@ -84,7 +113,7 @@ export function useGmailSSE(enabled: boolean = true) {
             }
 
             buffer += decoder.decode(value, { stream: true });
-            
+
             // Process complete messages (SSE format: event + data separated by \n\n)
             const messages = buffer.split('\n\n');
             buffer = messages.pop() || '';
@@ -108,23 +137,23 @@ export function useGmailSSE(enabled: boolean = true) {
 
                 if (eventData) {
                   const data: SSEEvent = JSON.parse(eventData);
-                  
+
                   console.log(`[SSE] Event received: ${eventType}`, data);
 
                   if (data.type === 'gmail-updated') {
                     // Invalidate AND refetch React Query caches immediately
                     queryClient.invalidateQueries({ queryKey: ['mailboxes'] });
                     queryClient.invalidateQueries({ queryKey: ['emails'] });
-                    
+
                     // Force immediate refetch to get latest data from server
                     queryClient.refetchQueries({ queryKey: ['mailboxes'], type: 'active' });
                     queryClient.refetchQueries({ queryKey: ['emails'], type: 'active' });
-                    
+
                     // Special handling for unsnooze: Add email to Kanban cache immediately
                     if ((data as any).action === 'unsnooze' && (data as any).email) {
                       const email = (data as any).email;
                       console.log('[SSE] Adding unsnoozed email to Kanban cache:', email.id);
-                      
+
                       queryClient.setQueryData(['kanban-emails'], (oldEmails: any[] = []) => {
                         // Check if email already exists
                         const exists = oldEmails.some(e => e.id === email.id);
@@ -135,11 +164,11 @@ export function useGmailSSE(enabled: boolean = true) {
                         // Add new
                         return [...oldEmails, email];
                       });
-                      
+
                       // Also invalidate to refresh counts
                       queryClient.invalidateQueries({ queryKey: ['kanban-emails'] });
                     }
-                    
+
                     // Dispatch custom event for component listeners
                     window.dispatchEvent(new CustomEvent('email-update', { detail: data }));
                   }
@@ -171,22 +200,6 @@ export function useGmailSSE(enabled: boolean = true) {
         });
     };
 
-    const scheduleReconnect = () => {
-      if (reconnectTimeoutRef.current) {
-        clearTimeout(reconnectTimeoutRef.current);
-      }
-
-      const delay = Math.min(1000 * Math.pow(2, reconnectAttempts), 30000);
-      console.log(`[SSE] Reconnecting in ${delay}ms (attempt ${reconnectAttempts + 1})`);
-
-      reconnectTimeoutRef.current = window.setTimeout(() => {
-        if (isMounted) {
-          setReconnectAttempts((prev) => prev + 1);
-          connect();
-        }
-      }, delay);
-    };
-
     // Initial connection
     connect();
 
@@ -207,7 +220,7 @@ export function useGmailSSE(enabled: boolean = true) {
 
       setIsConnected(false);
     };
-  }, [enabled, queryClient]); // Remove reconnectAttempts from dependencies!
+  }, [enabled, queryClient, user, loading]);
 
   return {
     isConnected,

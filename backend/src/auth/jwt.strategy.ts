@@ -29,7 +29,7 @@ export class JwtStrategy extends PassportStrategy(Strategy, 'jwt') {
     if (!user) {
       return null;
     }
-    
+
     // Return both 'sub' (from JWT) and 'userId' (from DB) for compatibility
     return {
       sub: payload.sub, // JWT subject (required by new endpoints like search)

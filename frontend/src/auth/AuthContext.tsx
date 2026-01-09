@@ -1,5 +1,5 @@
 import { createContext, useContext, useState, useEffect, useCallback } from 'react';
-import { api } from '../services/api';
+import { api, setAccessToken, getAccessToken, refreshAccessToken } from '../services/api';
 import { logoutSync } from '../services/logoutSync';
 import { multiDeviceLogoutSync } from '../services/multiDeviceLogoutSync';
 
@@ -11,10 +11,25 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
 
   const fetchUserProfile = useCallback(async () => {
     try {
+      // PROACTIVELY REFRESH if no token (prevents 401 on first load)
+      if (!getAccessToken()) {
+        try {
+          await refreshAccessToken();
+        } catch (refreshErr) {
+          // If refresh fails, we are not logged in. Stop here.
+          // Do not call profile, do not log error.
+          setUser(null);
+          return;
+        }
+      }
+
       const response = await api.get('/auth/profile');
       setUser(response.data);
     } catch (error) {
-      console.error('Not authenticated:', error);
+      // Don't log 401s as errors, they are expected when session expired/not logged in
+      if ((error as any)?.response?.status !== 401) {
+        console.error('Not authenticated:', error);
+      }
       setUser(null);
     } finally {
       setLoading(false);
@@ -30,7 +45,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     logoutSync.onLogout(() => {
       console.log('[AuthContext] 🔓 Received logout event from another tab');
       // Clear user state without calling API (other tab already called it)
-      localStorage.removeItem('access_token');
+      setAccessToken(null);
       setUser(null);
     });
 
@@ -46,17 +61,14 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     multiDeviceLogoutSync.onLogout(() => {
       console.log('[AuthContext] 🔓 Received logout event from another device');
       // Clear user state
-      localStorage.removeItem('access_token');
+      setAccessToken(null);
       setUser(null);
-      
+
       // Stop polling since we're logged out
       multiDeviceLogoutSync.stopPolling();
-      
+
       console.warn('[AuthContext] ⚠️ You have been logged out from another device');
     });
-
-    // Start polling for multi-device logout (after user is authenticated)
-    // This will be started on login and stopped on logout
 
     // Cleanup on unmount
     return () => {
@@ -69,6 +81,8 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   useEffect(() => {
     const handleVisibilityChange = () => {
       if (document.visibilityState === 'visible') {
+        // If we have an access token in memory, verify it
+        // If not, fetchUserProfile might trigger a refresh flow via api interceptor
         console.log('[AuthContext] 👁️ Tab became visible, verifying auth state');
         fetchUserProfile();
       }
@@ -83,19 +97,19 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   }, [fetchUserProfile]);
 
   const login = async (response?: any) => {
-    // Save token to localStorage if provided (from login response)
+    // Save token to memory logic if provided (from login response)
     if (response?.access_token) {
-      localStorage.setItem('access_token', response.access_token);
+      setAccessToken(response.access_token);
     }
     // After backend sets cookies, fetch profile to update state
     await fetchUserProfile();
 
     if (response?.user?.id) {
       const userId = response.user.id;
-      
+
       // Start polling for multi-device logout
       multiDeviceLogoutSync.startPolling();
-      
+
       // Broadcast login to other tabs
       logoutSync.broadcastLogin(userId);
     }
@@ -107,7 +121,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     } catch (error) {
       console.error('Logout failed', error);
     } finally {
-      localStorage.removeItem('access_token');
+      setAccessToken(null);
       setUser(null);
 
       // Stop polling multi-device logout

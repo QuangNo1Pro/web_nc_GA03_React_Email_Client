@@ -49,21 +49,15 @@ export class AuthController {
     const tokens = await this.authService.login(req.user);
     const isProduction = process.env.NODE_ENV === 'production';
 
-    res.cookie('access_token', tokens.access_token, {
-      httpOnly: true,
-      secure: isProduction,
-      sameSite: isProduction ? 'none' : 'lax',
-      domain: isProduction ? undefined : undefined,
-      path: '/',
-      maxAge: 30 * 1000, // 🧪 TEST: 30 seconds (change back to 15 * 60 * 1000)
-    });
+    // REMOVED: access_token cookie (now in-memory only on frontend)
+
     res.cookie('refresh_token', tokens.refresh_token, {
       httpOnly: true,
       secure: isProduction,
       sameSite: isProduction ? 'none' : 'lax',
       domain: isProduction ? undefined : undefined,
       path: '/',
-      maxAge: 2 * 60 * 1000, // 🧪 TEST: 2 minutes (change back to 7 * 24 * 60 * 60 * 1000)
+      maxAge: 7 * 24 * 60 * 60 * 1000,
     });
     return {
       status: 'success',
@@ -88,7 +82,7 @@ export class AuthController {
     }
 
     await this.authService.logout(userId);
-    res.clearCookie('access_token', { path: '/' });
+    // res.clearCookie('access_token', { path: '/' }); // Removed
     res.clearCookie('refresh_token', { path: '/' });
     return {
       status: 'success',
@@ -135,16 +129,9 @@ export class AuthController {
   ) {
     // The user object is attached by the jwt-refresh.strategy
     const tokens = await this.authService.refreshToken(req.user);
-    const isProduction = process.env.NODE_ENV === 'production';
 
-    res.cookie('access_token', tokens.access_token, {
-      httpOnly: true,
-      secure: isProduction,
-      sameSite: isProduction ? 'none' : 'lax',
-      domain: isProduction ? undefined : undefined,
-      path: '/',
-      maxAge: 30 * 1000, // 🧪 TEST: 30 seconds (change back to 15 * 60 * 1000)
-    });
+    // REMOVED: access_token cookie
+
     return {
       status: 'success',
       message: 'Token refreshed successfully',
@@ -165,14 +152,8 @@ export class AuthController {
     const tokens = await this.authService.googleLogin(req.user);
     const isProduction = process.env.NODE_ENV === 'production';
 
-    res.cookie('access_token', tokens.access_token, {
-      httpOnly: true,
-      secure: isProduction,
-      sameSite: isProduction ? 'none' : 'lax',
-      domain: isProduction ? undefined : undefined, // Let browser handle domain
-      path: '/',
-      maxAge: 15 * 60 * 1000, // 15 minutes
-    });
+    // REMOVED: access_token cookie
+
     res.cookie('refresh_token', tokens.refresh_token, {
       httpOnly: true,
       secure: isProduction,
@@ -286,13 +267,7 @@ export class AuthController {
     const tokens = await this.authService.login(dbUser);
     const isProduction = process.env.NODE_ENV === 'production';
 
-    res.cookie('access_token', tokens.access_token, {
-      httpOnly: true,
-      secure: isProduction,
-      sameSite: isProduction ? 'none' : 'lax',
-      path: '/',
-      maxAge: 15 * 60 * 1000,
-    });
+    // REMOVED: access_token cookie
 
     res.cookie('refresh_token', tokens.refresh_token, {
       httpOnly: true,

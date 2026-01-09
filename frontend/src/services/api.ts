@@ -11,7 +11,7 @@ export const api = axios.create({
 let cachedProvider: string | null = null;
 export const getUserProvider = async (): Promise<string> => {
   if (cachedProvider !== null) return cachedProvider;
-  
+
   try {
     const { data } = await api.get('/auth/profile');
     cachedProvider = data.provider || 'google';
@@ -26,10 +26,25 @@ export const clearProviderCache = () => {
   cachedProvider = null;
 };
 
+// ============================================================================
+// TOKEN MANAGEMENT (In-Memory)
+// ============================================================================
+let accessToken: string | null = null;
+
+export const setAccessToken = (token: string | null) => {
+  accessToken = token;
+};
+
+export const getAccessToken = () => accessToken;
+
+// ============================================================================
+// AXIOS INTERCEPTORS
+// ============================================================================
+
 let isRefreshing = false;
 let failedQueue: any[] = [];
 
-const processQueue = (error: any, token = null) => {
+const processQueue = (error: any, token: string | null = null) => {
   failedQueue.forEach((prom) => {
     if (error) {
       prom.reject(error);
@@ -41,13 +56,11 @@ const processQueue = (error: any, token = null) => {
   failedQueue = [];
 };
 
-// Add JWT token from localStorage to request headers if available
-// Otherwise rely on HttpOnly cookies sent automatically by withCredentials
+// Add JWT token from memory to request headers if available
 api.interceptors.request.use(
   (config) => {
-    const token = localStorage.getItem('access_token');
-    if (token) {
-      config.headers.Authorization = `Bearer ${token}`;
+    if (accessToken) {
+      config.headers.Authorization = `Bearer ${accessToken}`;
     }
     return config;
   },
@@ -59,12 +72,14 @@ api.interceptors.response.use(
   async (error) => {
     const originalRequest = error.config;
 
-    if (error.response.status === 401 && !originalRequest._retry) {
+    // If 401 and we haven't retried yet
+    if (error.response?.status === 401 && !originalRequest._retry) {
       if (isRefreshing) {
         return new Promise(function (resolve, reject) {
           failedQueue.push({ resolve, reject });
         })
-          .then(() => {
+          .then((token) => {
+            originalRequest.headers.Authorization = `Bearer ${token}`;
             return api(originalRequest);
           })
           .catch((err) => {
@@ -76,14 +91,18 @@ api.interceptors.response.use(
       isRefreshing = true;
 
       return new Promise(function (resolve, reject) {
-        axios
-          .post(`${API_BASE_URL}/auth/refresh`, {}, { withCredentials: true })
-          .then(() => {
-            processQueue(null, null);
+        refreshAccessToken()
+          .then((newToken) => {
+            // Retry original request with new token
+            originalRequest.headers.Authorization = `Bearer ${newToken}`;
+            processQueue(null, newToken);
             resolve(api(originalRequest));
           })
           .catch((err) => {
             processQueue(err, null);
+            setAccessToken(null); // Clear invalid token
+
+            // Only redirect to login if we're not already there
             if (window.location.pathname !== '/login') {
               window.location.href = '/login';
             }
@@ -98,3 +117,15 @@ api.interceptors.response.use(
     return Promise.reject(error);
   },
 );
+
+// Explicit refresh token function
+export const refreshAccessToken = async (): Promise<string> => {
+  try {
+    const res = await axios.post(`${API_BASE_URL}/auth/refresh`, {}, { withCredentials: true });
+    const newToken = res.data.access_token;
+    setAccessToken(newToken);
+    return newToken;
+  } catch (error) {
+    throw error;
+  }
+};
