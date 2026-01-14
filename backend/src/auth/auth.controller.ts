@@ -83,7 +83,15 @@ export class AuthController {
 
     await this.authService.logout(userId);
     // res.clearCookie('access_token', { path: '/' }); // Removed
-    res.clearCookie('refresh_token', { path: '/' });
+
+    const isProduction = process.env.NODE_ENV === 'production';
+    res.clearCookie('refresh_token', {
+      path: '/',
+      secure: isProduction,
+      sameSite: isProduction ? 'none' : 'lax',
+      domain: isProduction ? undefined : undefined
+    });
+
     return {
       status: 'success',
       message: 'Đăng xuất thành công',
