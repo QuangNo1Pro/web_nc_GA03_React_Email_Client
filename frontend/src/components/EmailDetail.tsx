@@ -1,9 +1,10 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { FaRegStar, FaStar } from 'react-icons/fa';
 import { FiFileText, FiTrash2 } from 'react-icons/fi';
 import { ArrowReply20Regular, ArrowReplyAll20Regular, ArrowForward20Regular } from '@fluentui/react-icons';
 import { getAvatarColor, extractEmails } from '../utils/emailUtils';
 import { getGmailLink } from '../services/emailService';
+import { api } from '../services/api';
 import toast from 'react-hot-toast';
 
 interface EmailDetailProps {
@@ -31,6 +32,127 @@ interface EmailDetailProps {
   setIsDeleteHoveredDetail: (v: boolean) => void;
 }
 
+const AttachmentItem: React.FC<{
+  attachment: any;
+  emailId: string;
+  downloadingAttachments: Set<string>;
+  handleDownloadAttachment: (emailId: string, attachment: any) => void;
+}> = ({ attachment, emailId, downloadingAttachments, handleDownloadAttachment }) => {
+  const isImage = attachment.mimeType?.startsWith('image/');
+  const isPdf = attachment.mimeType === 'application/pdf';
+  // Attempt preview for Image and small PDFs (< 5MB)
+  const shouldPreview = isImage || (isPdf && attachment.size < 5 * 1024 * 1024);
+
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [loadingPreview, setLoadingPreview] = useState(false);
+
+  useEffect(() => {
+    let isMounted = true;
+    const fetchPreview = async () => {
+      // Only fetch preview if eligible and valid attachmentId
+      if (shouldPreview && !previewUrl && attachment.attachmentId) {
+        setLoadingPreview(true);
+        try {
+          const { data } = await api.get(`/gmail/attachments/${emailId}/${attachment.attachmentId}`);
+          if (data && data.data && isMounted) {
+            const b64 = data.data.replace(/-/g, '+').replace(/_/g, '/');
+            // For PDF, data URI works in modern browsers
+            setPreviewUrl(`data:${attachment.mimeType};base64,${b64}`);
+          }
+        } catch (err) {
+          console.error("Failed to load preview", err);
+        } finally {
+          if (isMounted) setLoadingPreview(false);
+        }
+      }
+    };
+
+    fetchPreview();
+    return () => { isMounted = false; };
+  }, [attachment.attachmentId, emailId, shouldPreview, attachment.mimeType]);
+
+  const ext = attachment.filename.split('.').pop()?.toUpperCase() || 'FILE';
+
+  return (
+    <div
+      className="group relative flex flex-col rounded-xl border overflow-hidden transition-all hover:shadow-lg"
+      style={{
+        backgroundColor: 'var(--bg-primary)',
+        borderColor: 'var(--border-primary)',
+      }}
+    >
+      {/* Preview / Icon Area */}
+      <div
+        className="h-32 flex items-center justify-center relative overflow-hidden bg-white"
+        style={{ backgroundColor: isPdf && previewUrl ? '#fff' : 'var(--bg-secondary)' }}
+      >
+        {shouldPreview && previewUrl ? (
+          isImage ? (
+            <img
+              src={previewUrl}
+              alt={attachment.filename}
+              className="w-full h-full object-cover transition-transform group-hover:scale-105"
+            />
+          ) : (
+            <iframe
+              src={`${previewUrl}#toolbar=0&navpanes=0&scrollbar=0&view=Fit`}
+              className="w-full h-full border-none pointer-events-none select-none"
+              style={{ overflow: 'hidden' }}
+              tabIndex={-1}
+              title={attachment.filename}
+            />
+          )
+        ) : (
+          <div className="flex flex-col items-center gap-2 opacity-50 group-hover:opacity-100 transition-opacity">
+            {loadingPreview ? (
+              <span className="material-symbols-outlined animate-spin" style={{ fontSize: '32px', color: 'var(--text-tertiary)' }}>progress_activity</span>
+            ) : (
+              <>
+                <FiFileText size={40} style={{ color: 'var(--text-secondary)' }} />
+                <span className="text-xs font-bold" style={{ color: 'var(--text-tertiary)' }}>{ext}</span>
+              </>
+            )}
+          </div>
+        )}
+
+        {/* Hover Overlay - Transparent trigger for buttons */}
+        <div className="absolute inset-0 bg-black/5 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center backdrop-blur-[1px] z-10">
+          <button
+            onClick={() => handleDownloadAttachment(emailId, attachment)}
+            disabled={downloadingAttachments.has(attachment.attachmentId)}
+            className="p-3 rounded-full shadow-lg transform scale-90 group-hover:scale-100 transition-all cursor-pointer"
+            style={{ backgroundColor: 'var(--accent-primary)', color: '#fff' }}
+            title="Tải xuống"
+          >
+            {downloadingAttachments.has(attachment.attachmentId) ? (
+              <span className="material-symbols-outlined animate-spin" style={{ fontSize: '20px' }}>progress_activity</span>
+            ) : (
+              <span className="material-symbols-outlined" style={{ fontSize: '20px' }}>download</span>
+            )}
+          </button>
+        </div>
+      </div>
+
+      {/* Info Footer */}
+      <div className="p-3 border-t z-20 bg-white" style={{ borderColor: 'var(--border-primary)', backgroundColor: 'var(--bg-primary)' }}>
+        <div
+          className="font-medium truncate text-sm mb-1"
+          title={attachment.filename}
+          style={{ color: 'var(--text-primary)' }}
+        >
+          {attachment.filename}
+        </div>
+        <div
+          className="text-xs font-medium"
+          style={{ color: 'var(--text-tertiary)' }}
+        >
+          {Math.round(attachment.size / 1024)} KB
+        </div>
+      </div>
+    </div>
+  );
+};
+
 const EmailDetail: React.FC<EmailDetailProps> = ({
   email,
   starredState,
@@ -57,8 +179,81 @@ const EmailDetail: React.FC<EmailDetailProps> = ({
 }) => {
   const [isGmailHovered, setIsGmailHovered] = useState(false);
   const [isOpeningGmail, setIsOpeningGmail] = useState(false);
+  const [displayBody, setDisplayBody] = useState(email.body || '');
+
+  // Reset display body when email changes
+  useEffect(() => {
+    setDisplayBody(email.body || '');
+  }, [email.body]);
+
+  // Handle inline images (cid:)
+  useEffect(() => {
+    let isMounted = true;
+    const processInlineImages = async () => {
+      if (!email.body) return;
+
+      const cidRegex = /src="cid:([^"]+)"/g;
+      const matches = [...email.body.matchAll(cidRegex)];
+
+      if (matches.length === 0) return;
+
+      console.log(`[EmailDetail] Found ${matches.length} inline images to load`);
+
+      // Copy current body to start replacement
+      let newBody = email.body;
+      let hasUpdates = false;
+
+      // Process unique CIDs
+      const uniqueCids = [...new Set(matches.map(m => m[1]))];
+
+      await Promise.all(uniqueCids.map(async (cid) => {
+        // Find attachment with matching contentId
+        const attachment = email.attachments?.find((att: any) => att.contentId === cid);
+
+        if (attachment) {
+          try {
+            // Fetch attachment content
+            const { data } = await api.get(`/gmail/attachments/${email.id}/${attachment.attachmentId}`);
+            if (data && data.data) {
+              const b64 = data.data.replace(/-/g, '+').replace(/_/g, '/');
+              const dataUri = `data:${attachment.mimeType};base64,${b64}`;
+
+              // Replace ALL occurrences of this cid
+              // Escape regex special chars in cid just in case
+              const safeCid = cid.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+              newBody = newBody.replace(new RegExp(`src="cid:${safeCid}"`, 'g'), `src="${dataUri}"`);
+              hasUpdates = true;
+            }
+          } catch (err) {
+            console.error(`Failed to load inline image ${cid}`, err);
+          }
+        }
+      }));
+
+      if (isMounted && hasUpdates) {
+        setDisplayBody(newBody);
+      }
+    };
+
+    processInlineImages();
+    return () => { isMounted = false; };
+  }, [email.id, email.body, email.attachments]);
 
   if (!email) return null;
+
+  // ... unchanged code ...
+
+  // ... update JSX render ...
+  <div
+    className="email-body prose max-w-none leading-relaxed"
+    style={{
+      color: 'var(--text-primary)',
+      fontSize: '15px',
+      lineHeight: '1.6',
+    }}
+    dangerouslySetInnerHTML={{ __html: displayBody }}
+  />
+  // ...
 
   // Handle open in Gmail
   const handleOpenInGmail = async () => {
@@ -79,25 +274,25 @@ const EmailDetail: React.FC<EmailDetailProps> = ({
   const parseSender = () => {
     // Use email.from if available (from detail API), otherwise fallback to email.sender (from list)
     const senderField = email.from || email.sender;
-    
+
     if (!senderField) return { name: "Unknown Sender", email: "" };
-    
+
     // Extract email using extractEmails helper for reliability
     const emails = extractEmails(senderField);
     const emailAddress = emails.length > 0 ? emails[0] : "";
-    
+
     // Extract name from "Name <email>" format
     const match = senderField.match(/^("?)([^"<]*)\1\s*<([^>]+)>$/);
     if (match) {
       const name = match[2].trim() || match[3].split('@')[0];
       return { name, email: emailAddress };
     }
-    
+
     // If it's just an email address
     if (emailAddress) {
       return { name: emailAddress.split("@")[0], email: emailAddress };
     }
-    
+
     // Fallback: it's probably just a name without email
     return { name: senderField, email: "" };
   };
@@ -183,7 +378,7 @@ const EmailDetail: React.FC<EmailDetailProps> = ({
                 }}
               >
                 <ArrowReply20Regular
-                  style={{ color: isReplyHoveredDetail ? 'var(--accent-primary)' : 'var(--text-secondary)'  }}
+                  style={{ color: isReplyHoveredDetail ? 'var(--accent-primary)' : 'var(--text-secondary)' }}
                 />
               </button>
               <button
@@ -325,18 +520,18 @@ const EmailDetail: React.FC<EmailDetailProps> = ({
               {(() => {
                 // Use email.received if available (from detail API), otherwise use email.timestamp (from list)
                 const dateValue = email.received || email.timestamp;
-                
+
                 if (!dateValue) {
                   return 'Không rõ thời gian';
                 }
-                
+
                 const date = new Date(dateValue);
-                
+
                 // Check if date is valid
                 if (isNaN(date.getTime())) {
                   return 'Không rõ thời gian';
                 }
-                
+
                 const weekday = date.toLocaleString('vi-VN', { weekday: 'long' }).replace(/^\w/, (c) => c.toUpperCase());
                 const dateTime = date.toLocaleString('vi-VN', {
                   day: 'numeric',
@@ -387,91 +582,15 @@ const EmailDetail: React.FC<EmailDetailProps> = ({
                   {email.attachments.length} tệp đính kèm
                 </h3>
               </div>
-              <div className="grid grid-cols-1 gap-3">
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
                 {email.attachments.map((attachment: any, index: number) => (
-                  <div
+                  <AttachmentItem
                     key={index}
-                    className="flex items-center justify-between p-4 rounded-xl border transition-all cursor-pointer group"
-                    style={{
-                      backgroundColor: 'var(--bg-secondary)',
-                      borderColor: 'var(--border-primary)',
-                    }}
-                    onMouseEnter={(e) => {
-                      e.currentTarget.style.backgroundColor = 'var(--bg-hover)';
-                      e.currentTarget.style.borderColor = 'var(--accent-primary)';
-                      e.currentTarget.style.transform = 'translateY(-1px)';
-                      e.currentTarget.style.boxShadow = '0 4px 12px rgba(0, 0, 0, 0.08)';
-                    }}
-                    onMouseLeave={(e) => {
-                      e.currentTarget.style.backgroundColor = 'var(--bg-secondary)';
-                      e.currentTarget.style.borderColor = 'var(--border-primary)';
-                      e.currentTarget.style.transform = 'translateY(0)';
-                      e.currentTarget.style.boxShadow = 'none';
-                    }}
-                  >
-                    <div className="flex items-center gap-3 min-w-0 flex-1">
-                      <div
-                        className="w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0"
-                        style={{ backgroundColor: 'var(--accent-primary-light, rgba(59, 130, 246, 0.1))' }}
-                      >
-                        <FiFileText
-                          size={20}
-                          style={{ color: 'var(--accent-primary)' }}
-                        />
-                      </div>
-                      <div className="truncate">
-                        <div
-                          className="text-sm font-medium truncate group-hover:text-blue-600 transition-colors"
-                          style={{ color: 'var(--text-primary)' }}
-                        >
-                          {attachment.filename}
-                        </div>
-                        <div
-                          className="text-xs mt-0.5"
-                          style={{ color: 'var(--text-tertiary)' }}
-                        >
-                          {attachment.mimeType?.split('/')[1]?.toUpperCase() || 'FILE'} • {Math.round(attachment.size / 1024)} KB
-                        </div>
-                      </div>
-                    </div>
-                    <button
-                      className="px-4 py-2 text-sm rounded-lg font-medium transition-all flex items-center gap-2 flex-shrink-0"
-                      style={{
-                        backgroundColor: 'var(--accent-primary)',
-                        color: 'white',
-                      }}
-                      onClick={() => handleDownloadAttachment(email.id, attachment)}
-                      disabled={downloadingAttachments.has(attachment.attachmentId)}
-                      onMouseEnter={(e) => {
-                        if (!downloadingAttachments.has(attachment.attachmentId)) {
-                          e.currentTarget.style.backgroundColor = 'var(--accent-primary-hover)';
-                          e.currentTarget.style.transform = 'scale(1.05)';
-                        }
-                      }}
-                      onMouseLeave={(e) => {
-                        if (!downloadingAttachments.has(attachment.attachmentId)) {
-                          e.currentTarget.style.backgroundColor = 'var(--accent-primary)';
-                          e.currentTarget.style.transform = 'scale(1)';
-                        }
-                      }}
-                    >
-                      {downloadingAttachments.has(attachment.attachmentId) ? (
-                        <>
-                          <span className="material-symbols-outlined animate-spin" style={{ fontSize: '18px' }}>
-                            progress_activity
-                          </span>
-                          <span>Đang tải...</span>
-                        </>
-                      ) : (
-                        <>
-                          <span className="material-symbols-outlined" style={{ fontSize: '18px' }}>
-                            download
-                          </span>
-                          <span>Tải xuống</span>
-                        </>
-                      )}
-                    </button>
-                  </div>
+                    attachment={attachment}
+                    emailId={email.id}
+                    downloadingAttachments={downloadingAttachments}
+                    handleDownloadAttachment={handleDownloadAttachment}
+                  />
                 ))}
               </div>
             </div>

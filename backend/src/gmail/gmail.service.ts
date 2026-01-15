@@ -485,18 +485,37 @@ export class GmailService {
     };
   }
 
-  private parseBody(payload: gmail_v1.Schema$MessagePart) {
-    let body = '';
-    if (payload.parts) {
-      payload.parts.forEach((part) => {
-        if (part.mimeType === 'text/html' && part.body?.data) {
-          body = Buffer.from(part.body.data, 'base64').toString();
+  private parseBody(payload: gmail_v1.Schema$MessagePart): string {
+    // 1. Recursive Helper to find HTML or Plain Text
+    const findBody = (p: gmail_v1.Schema$MessagePart): { html?: string; plain?: string } => {
+      let html: string | undefined;
+      let plain: string | undefined;
+
+      // Direct check
+      if (p.mimeType === 'text/html' && p.body?.data) {
+        html = Buffer.from(p.body.data, 'base64').toString();
+      } else if (p.mimeType === 'text/plain' && p.body?.data) {
+        plain = Buffer.from(p.body.data, 'base64').toString();
+      }
+
+      // Recursive check for parts
+      if (p.parts) {
+        for (const part of p.parts) {
+          const result = findBody(part);
+          if (result.html) html = result.html; // prioritize HTML
+          if (!plain && result.plain) plain = result.plain; // keep first plain
         }
-      });
-    } else if (payload.body?.data) {
-      body = Buffer.from(payload.body.data, 'base64').toString();
-    }
-    return body;
+      }
+
+      return { html, plain };
+    };
+
+    const result = findBody(payload);
+
+    if (result.html) return result.html;
+    if (result.plain) return result.plain.replace(/\r\n/g, '<br>').replace(/\n/g, '<br>'); // Simple plain->html conversion
+
+    return '';
   }
 
   private parseHeaders(headers: gmail_v1.Schema$MessagePartHeader[]) {
@@ -1295,83 +1314,187 @@ export class GmailService {
     attachments?: { filename: string; mimeType: string; base64Content: string }[],
     from?: string,
   ) {
-    const emailLines = [];
+    const emailLines: string[] = [];
 
-    // Add sender, recipients
-    if (from) {
-      emailLines.push(`From: ${from}`);
-    }
-    // Only add 'To' header if it's a valid email address
-    // Gmail draft allows omitting 'To' header
+    // 1. Process body for inline images
+    const { processedBody, inlineImages } = this.processBodyForInlineImages(body);
+
+    const hasAttachments = attachments && attachments.length > 0;
+    const hasInlineImages = inlineImages && inlineImages.length > 0;
+
+    // Boundary definitions
+    const mixedBoundary = `----=_Part_Mixed_${Date.now()}_${Math.random().toString(36).substring(7)}`;
+    const relatedBoundary = `----=_Part_Related_${Date.now()}_${Math.random().toString(36).substring(7)}`;
+
+    // === HEADERS ===
+    if (from) emailLines.push(`From: ${from}`);
+
+    // Recipients
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (to && emailRegex.test(to.trim())) {
-      emailLines.push(`To: ${to.trim()}`);
-    }
-    if (cc && cc.trim()) {
-      emailLines.push(`Cc: ${cc.trim()}`);
-    }
-    if (bcc && bcc.trim()) {
-      emailLines.push(`Bcc: ${bcc.trim()}`);
-    }
+    if (to && emailRegex.test(to.trim())) emailLines.push(`To: ${to.trim()}`);
+    if (cc && cc.trim()) emailLines.push(`Cc: ${cc.trim()}`);
+    if (bcc && bcc.trim()) emailLines.push(`Bcc: ${bcc.trim()}`);
 
-    // RFC 2047 encoding for subject with UTF-8
-    // Format: =?UTF-8?B?{base64}?=
-    const encodedSubject = `=?UTF-8?B?${Buffer.from(subject, 'utf-8').toString('base64')}?=`;
+    // RFC 2047 Subject Encoding
+    // Sanitize subject to remove newlines which break headers
+    const sanitizedSubject = (subject || '').replace(/[\r\n]+/g, ' ');
+    const encodedSubject = `=?UTF-8?B?${Buffer.from(sanitizedSubject, 'utf-8').toString('base64')}?=`;
     emailLines.push(`Subject: ${encodedSubject}`);
     emailLines.push('MIME-Version: 1.0');
 
-    if (attachments && attachments.length > 0) {
-      const boundary = `----=_Part_${Date.now()}_${Math.random().toString(36).substring(7)}`;
-
-      emailLines.push(`Content-Type: multipart/mixed; boundary="${boundary}"`);
-      emailLines.push('');
-      emailLines.push(`--${boundary}`);
+    // Determine Content-Type structure
+    if (hasAttachments) {
+      emailLines.push(`Content-Type: multipart/mixed; boundary="${mixedBoundary}"`);
+    } else if (hasInlineImages) {
+      emailLines.push(`Content-Type: multipart/related; boundary="${relatedBoundary}"`);
+    } else {
       emailLines.push('Content-Type: text/html; charset=UTF-8');
       emailLines.push('Content-Transfer-Encoding: base64');
-      emailLines.push('');
+    }
 
-      // Encode body as base64 for proper UTF-8 handling
-      const bodyBase64 = Buffer.from(body, 'utf-8').toString('base64');
-      const bodyLines = bodyBase64.match(/.{1,76}/g) || [];
-      // Use concat instead of spread to avoid stack overflow on large content
-      for (const line of bodyLines) {
-        emailLines.push(line);
+    emailLines.push(''); // End of headers
+
+    // === BODY CONSTRUCTION ===
+
+    // Case 1: Complex (Attachments + Inline Images + HTML)
+    // Structure: multipart/mixed -> [multipart/related -> [HTML, Inline Imgs], Attachments]
+    if (hasAttachments) {
+      emailLines.push(`--${mixedBoundary}`);
+
+      // Inner part: multipart/related (if has inline images) OR text/html (if no inline)
+      if (hasInlineImages) {
+        emailLines.push(`Content-Type: multipart/related; boundary="${relatedBoundary}"`);
+        emailLines.push('');
+
+        // HTML Part
+        emailLines.push(`--${relatedBoundary}`);
+        emailLines.push('Content-Type: text/html; charset=UTF-8');
+        emailLines.push('Content-Transfer-Encoding: base64');
+        emailLines.push('');
+        emailLines.push(this.base64EncodeBody(processedBody));
+        emailLines.push('');
+
+        // Inline Images Parts
+        inlineImages.forEach(img => {
+          emailLines.push(`--${relatedBoundary}`);
+          emailLines.push(`Content-Type: ${img.mimeType}; name="${img.filename}"`);
+          emailLines.push('Content-Transfer-Encoding: base64');
+          emailLines.push(`Content-ID: <${img.contentId}>`);
+          emailLines.push(`Content-Disposition: inline; filename="${img.filename}"`);
+          emailLines.push('');
+          emailLines.push(this.splitBase64(img.base64Content));
+          emailLines.push('');
+        });
+        emailLines.push(`--${relatedBoundary}--`);
+
+      } else {
+        // Just HTML inside mixed
+        emailLines.push('Content-Type: text/html; charset=UTF-8');
+        emailLines.push('Content-Transfer-Encoding: base64');
+        emailLines.push('');
+        emailLines.push(this.base64EncodeBody(processedBody));
       }
       emailLines.push('');
 
-      attachments.forEach((attachment) => {
-        emailLines.push(`--${boundary}`);
-        emailLines.push(`Content-Type: ${attachment.mimeType}; name="${attachment.filename}"`);
-        emailLines.push('Content-Transfer-Encoding: base64');
-        emailLines.push(`Content-Disposition: attachment; filename="${attachment.filename}"`);
-        emailLines.push('');
+      // Attachments Parts
+      if (attachments) {
+        attachments.forEach((attachment) => {
+          emailLines.push(`--${mixedBoundary}`);
+          // Encode filename to support matching standard
+          const encodedFilename = `=?UTF-8?B?${Buffer.from(attachment.filename, 'utf-8').toString('base64')}?=`;
 
-        // Split base64 content into 76-character lines (RFC 2045)
-        const base64Lines = attachment.base64Content.match(/.{1,76}/g) || [];
-        // Use for loop instead of spread to avoid stack overflow on large files
-        for (const line of base64Lines) {
-          emailLines.push(line);
-        }
+          emailLines.push(`Content-Type: ${attachment.mimeType}; name="${encodedFilename}"`);
+          emailLines.push('Content-Transfer-Encoding: base64');
+          emailLines.push(`Content-Disposition: attachment; filename="${encodedFilename}"`);
+          emailLines.push('');
+          emailLines.push(this.splitBase64(attachment.base64Content));
+          emailLines.push('');
+        });
+      }
+      emailLines.push(`--${mixedBoundary}--`);
+
+    }
+    // Case 2: Inline Images Only (multipart/related)
+    else if (hasInlineImages) {
+      // HTML Part
+      emailLines.push(`--${relatedBoundary}`);
+      emailLines.push('Content-Type: text/html; charset=UTF-8');
+      emailLines.push('Content-Transfer-Encoding: base64');
+      emailLines.push('');
+      emailLines.push(this.base64EncodeBody(processedBody));
+      emailLines.push('');
+
+      // Inline Images Parts
+      inlineImages.forEach(img => {
+        emailLines.push(`--${relatedBoundary}`);
+        emailLines.push(`Content-Type: ${img.mimeType}; name="${img.filename}"`);
+        emailLines.push('Content-Transfer-Encoding: base64');
+        emailLines.push(`Content-ID: <${img.contentId}>`);
+        emailLines.push(`Content-Disposition: inline; filename="${img.filename}"`);
+        emailLines.push('');
+        emailLines.push(this.splitBase64(img.base64Content));
         emailLines.push('');
       });
-
-      emailLines.push(`--${boundary}--`); // Closing boundary
-    } else {
-      // Simple text/html message with proper UTF-8 encoding
-      emailLines.push('Content-Type: text/html; charset=UTF-8');
-      emailLines.push('Content-Transfer-Encoding: base64');
-      emailLines.push('');
-
-      // Encode body as base64 for UTF-8
-      const bodyBase64 = Buffer.from(body, 'utf-8').toString('base64');
-      const bodyLines = bodyBase64.match(/.{1,76}/g) || [];
-      // Use for loop instead of spread to avoid stack overflow on large content
-      for (const line of bodyLines) {
-        emailLines.push(line);
-      }
+      emailLines.push(`--${relatedBoundary}--`);
+    }
+    // Case 3: Simple HTML
+    else {
+      emailLines.push(this.base64EncodeBody(processedBody));
     }
 
     return Buffer.from(emailLines.join('\r\n')).toString('base64');
+  }
+
+  private processBodyForInlineImages(body: string) {
+    const inlineImages: { mimeType: string, base64Content: string, contentId: string, filename: string }[] = [];
+
+    // Regex detect base64 images src="data:image/png;base64,..."
+    // Note: Non-greedy match for base64 data to avoid over-matching, but base64 chars are limited. 
+    // Standard approach: data:image/([a-zA-Z]+);base64,([^"]+)
+    const imgRegex = /<img[^>]+src="data:image\/([a-zA-Z]+);base64,([^"]+)"/g;
+
+    let index = 0;
+
+    const processedBody = body.replace(imgRegex, (match, mimeSubtype, base64Data) => {
+      index++;
+      const contentId = `inline_img_${Date.now()}_${index}@match`; // simple content-id
+      const filename = `image-${Date.now()}-${index}.${mimeSubtype}`;
+
+      inlineImages.push({
+        mimeType: `image/${mimeSubtype}`,
+        base64Content: base64Data,
+        contentId: contentId,
+        filename: filename
+      });
+
+      // Reconstruct tag with cid
+      // Careful: The regex matched the whole <img ... src="..."> part? No, only up to closing quote of src.
+      // match is like: <img ... src="data...base64..."
+      // We need to return only the src part changed?
+      // Wait, replace handles the FULL MATCH.
+      // My regex `<img[^>]+src="data:image\/([a-zA-Z]+);base64,([^"]+)"` matches from `<img` start up to closing quote of `src`.
+      // So we need to reconstruct the `src` part properly.
+
+      // Actually simpler: replace `data:image/...;base64,...` with `cid:...`
+      // But we need to extract data first.
+
+      // Let's redo regex to be safer. Match ONLY the src attribute value if possible?
+      // String.replace on the whole body is easier.
+
+      return match.replace(/src="data:image\/[a-zA-Z]+;base64,[^"]+"/, `src="cid:${contentId}"`);
+    });
+
+    return { processedBody, inlineImages };
+  }
+
+  private base64EncodeBody(text: string): string {
+    const bodyBase64 = Buffer.from(text, 'utf-8').toString('base64');
+    return this.splitBase64(bodyBase64);
+  }
+
+  private splitBase64(base64Str: string): string {
+    const lines = base64Str.match(/.{1,76}/g) || [];
+    return lines.join('\r\n');
   }
 
   async revokeToken(userId: string) {

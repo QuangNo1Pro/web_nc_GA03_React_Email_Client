@@ -40,6 +40,7 @@ import { useComposeEmail } from '../hooks/useComposeEmail';
 import { useComposeHandlers } from '../hooks/useComposeHandlers';
 import { useEmailPagination } from '../hooks/useEmailPagination';
 import { useGmailSSE } from '../hooks/useGmailSSE';
+import { KeyboardShortcutsHelp, KeyboardShortcutsButton } from '../components/KeyboardShortcutsHelp';
 
 const FixedSizeList = (ReactWindow as any).FixedSizeList;
 
@@ -147,6 +148,7 @@ export default function Inbox() {
     logout();
   };
   const [selectedEmail, setSelectedEmail] = useState<string | null>(null);
+  const [enableAutoSelect, setEnableAutoSelect] = useState(false); // Only auto-select when using keyboard
   const [mobileView, setMobileView] = useState<'emails' | 'email'>('emails');
 
   const [starredState, setStarredState] = useState<{ [id: string]: boolean }>(
@@ -293,6 +295,38 @@ export default function Inbox() {
     queryKey: ['mailboxes'],
     queryFn: fetchMailboxes,
   });
+
+  // === KEYBOARD NAVIGATION STATE ===
+  const [navMode, setNavMode] = useState<'emails' | 'sidebar'>('emails');
+  const [focusedMailboxId, setFocusedMailboxId] = useState<string | null>(null);
+
+  const navMailboxOrder = useMemo(() => [
+    "CHAT", "INBOX", "UNREAD", "STARRED", "SENT", "DRAFT", "IMPORTANT", "SPAM", "TRASH"
+  ], []);
+
+  const sortedMailboxes = useMemo(() => {
+    if (!mailboxes) return [];
+    return mailboxes
+      .filter((mb: any) => {
+        const allowed = ["CHAT", "INBOX", "UNREAD", "STARRED", "SENT", "DRAFT", "IMPORTANT", "SPAM", "TRASH", "ALL_MAIL"];
+        return allowed.includes(mb.id);
+      })
+      .sort((a: any, b: any) => {
+        const idxA = navMailboxOrder.indexOf(a.id);
+        const idxB = navMailboxOrder.indexOf(b.id);
+        if (idxA !== -1 && idxB !== -1) return idxA - idxB;
+        if (idxA !== -1) return -1;
+        if (idxB !== -1) return 1;
+        return a.id.localeCompare(b.id);
+      });
+  }, [mailboxes, navMailboxOrder]);
+
+  // Sync focused mailbox with selection when switching mode or initially
+  useEffect(() => {
+    if (navMode === 'emails' && selectedMailbox) {
+      setFocusedMailboxId(selectedMailbox);
+    }
+  }, [selectedMailbox, navMode]);
 
   // Debug: log mailboxes data
   useEffect(() => {
@@ -459,6 +493,9 @@ export default function Inbox() {
     const token = localStorage.getItem('access_token');
     console.log('[Inbox] 🔐 Token in localStorage:', token ? `Exists (${token.substring(0, 20)}...)` : 'NOT FOUND');
 
+    setSearchQuery(query); // ✅ Sync searchQuery state
+
+
     if (!query.trim()) {
       setIsInSearchMode(false);
       setSearchResults([]);
@@ -470,6 +507,7 @@ export default function Inbox() {
       setIsSearching(true);
       setSearchError(null);
       setIsInSearchMode(true); // Set search mode immediately
+      setSelectedEmail(null); // Clear selected email when starting a search
       console.log('[Inbox] 📡 Calling', searchMode, 'search API with label:', selectedMailbox);
 
       const response = searchMode === 'fuzzy'
@@ -506,11 +544,15 @@ export default function Inbox() {
     setSearchQuery('');
     setSearchResults([]);
     setSearchError(null);
+    setSearchError(null);
+    setSelectedEmail(null);
+    setEnableAutoSelect(false); // Reset auto-select
   };
 
   const handleMailboxSelect = (mailboxId: string) => {
     setSelectedMailbox(mailboxId);
     setSelectedEmail(null);
+    setEnableAutoSelect(false); // Reset auto-select
     setMobileView('emails');
     setStarredState({});
     setReadState({});
@@ -518,33 +560,87 @@ export default function Inbox() {
     setShowCheckboxes(false);
     setFocusedEmailIndex(0);
     setCurrentPage(1); // reset về page 1 khi đổi mailbox
+
+    // 🔍 Reset search state khi đổi mailbox
+    setIsInSearchMode(false);
+    setSearchQuery('');
+    setSearchResults([]);
+    setSearchError(null);
+
     queryClient.invalidateQueries({ queryKey: ['mailboxes'] });
   };
 
   // Keyboard navigation (trên trang hiện tại)
   useEffect(() => {
-    console.log('[Inbox] State changed - selectedEmail:', selectedEmail, 'mobileView:', mobileView);
+    // Debug log state changes if needed
   }, [selectedEmail, mobileView]);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (!paginatedEmails || paginatedEmails.length === 0) return;
+      // 1. Ignore inputs & contenteditable
+      const target = e.target as HTMLElement;
+      if (['INPUT', 'TEXTAREA'].includes(target.tagName) || target.isContentEditable) return;
+      if (showComposeModal && !e.ctrlKey) return;
 
       switch (e.key) {
         case 'ArrowDown':
           e.preventDefault();
-          setFocusedEmailIndex((prev) =>
-            Math.min(prev + 1, paginatedEmails.length - 1),
-          );
+          setEnableAutoSelect(true); // Enable auto-select on keyboard nav
+          if (navMode === 'emails') {
+            if (paginatedEmails && paginatedEmails.length > 0) {
+              setFocusedEmailIndex((prev) => Math.min(prev + 1, paginatedEmails.length - 1));
+            }
+          } else if (navMode === 'sidebar') {
+            if (sortedMailboxes.length > 0) {
+              const currIdx = sortedMailboxes.findIndex((m: any) => m.id === focusedMailboxId);
+              const nextIdx = currIdx === -1 ? 0 : Math.min(currIdx + 1, sortedMailboxes.length - 1);
+              setFocusedMailboxId(sortedMailboxes[nextIdx].id);
+            }
+          }
           break;
         case 'ArrowUp':
           e.preventDefault();
-          setFocusedEmailIndex((prev) => Math.max(prev - 1, 0));
+          setEnableAutoSelect(true); // Enable auto-select on keyboard nav
+          if (navMode === 'emails') {
+            setFocusedEmailIndex((prev) => Math.max(prev - 1, 0));
+          } else if (navMode === 'sidebar') {
+            if (sortedMailboxes.length > 0) {
+              const currIdx = sortedMailboxes.findIndex((m: any) => m.id === focusedMailboxId);
+              const nextIdx = currIdx === -1 ? 0 : Math.max(currIdx - 1, 0);
+              setFocusedMailboxId(sortedMailboxes[nextIdx].id);
+            }
+          }
+          break;
+        case 'ArrowLeft':
+          // Move from emails -> sidebar
+          if (navMode === 'emails') {
+            e.preventDefault();
+            setNavMode('sidebar');
+            if (!focusedMailboxId && selectedMailbox) {
+              setFocusedMailboxId(selectedMailbox);
+            } else if (!focusedMailboxId && sortedMailboxes.length > 0) {
+              setFocusedMailboxId(sortedMailboxes[0].id);
+            }
+          }
+          break;
+        case 'ArrowRight':
+          // Move from sidebar -> emails
+          if (navMode === 'sidebar') {
+            e.preventDefault();
+            setNavMode('emails');
+          }
           break;
         case 'Enter':
           e.preventDefault();
-          if (paginatedEmails[focusedEmailIndex]) {
-            handleEmailSelect(paginatedEmails[focusedEmailIndex].id);
+          if (navMode === 'emails') {
+            if (paginatedEmails && paginatedEmails[focusedEmailIndex]) {
+              handleEmailSelect(paginatedEmails[focusedEmailIndex].id);
+            }
+          } else if (navMode === 'sidebar') {
+            if (focusedMailboxId) {
+              handleMailboxSelect(focusedMailboxId);
+              setNavMode('emails');
+            }
           }
           break;
         case 'r':
@@ -554,7 +650,11 @@ export default function Inbox() {
           }
           break;
         case 'c':
-          if (e.ctrlKey || e.metaKey) {
+          // Allow Ctrl+C (common user expectation/guide) or just 'c'
+          // If text is selected, let default Copy (Ctrl+C) happen
+          if (window.getSelection()?.toString()) break;
+
+          if (e.ctrlKey || e.metaKey || !e.ctrlKey) {
             e.preventDefault();
             setEditingDraftId(null);
             setShowComposeModal(true);
@@ -582,6 +682,8 @@ export default function Inbox() {
           } else if (selectedEmail) {
             setSelectedEmail(null);
             setMobileView('emails');
+            // If viewing list details, ensure nav mode is emails
+            setNavMode('emails');
           }
           break;
         case '?':
@@ -602,7 +704,12 @@ export default function Inbox() {
     showComposeModal,
     showKeyboardHelp,
     showMailboxMenu,
+    navMode,
+    focusedMailboxId,
+    sortedMailboxes,
+    selectedMailbox
   ]);
+
 
   // update height list khi resize
   useEffect(() => {
@@ -651,6 +758,7 @@ export default function Inbox() {
   // khi đổi filter / mailbox / page → reset focus về dòng đầu
   useEffect(() => {
     setFocusedEmailIndex(0);
+    setSelectedEmail(null); // Clear selected email when context changes
   }, [selectedMailbox, readFilter, currentPage]);
 
   const handleToggleStar = async (emailId: string) => {
@@ -751,6 +859,14 @@ export default function Inbox() {
 
 
   const handleEmailSelect = async (emailId: string) => {
+    // Sync focused index to prevent keyboard nav effect from overriding mouse selection
+    if (paginatedEmails) {
+      const idx = paginatedEmails.findIndex((e: any) => e.id === emailId);
+      if (idx !== -1) {
+        setFocusedEmailIndex(idx);
+      }
+    }
+
     // If in UNREAD mailbox, remove read emails from cache when selecting new email
     if (selectedMailbox === 'UNREAD' && selectedEmail !== emailId) {
       queryClient.setQueryData(['emails', 'UNREAD'], (oldData: any) => {
@@ -1302,6 +1418,25 @@ export default function Inbox() {
 
 
 
+  // Auto-select email on keyboard navigation (Desktop)
+  useEffect(() => {
+    const isDesktop = window.innerWidth >= 768;
+
+    // Only auto-select if in 'emails' mode, on desktop (split view), list is populated 
+    // AND enabled via keyboard interaction
+    if (navMode === 'emails' && isDesktop && paginatedEmails && paginatedEmails.length > 0 && enableAutoSelect) {
+      const timer = setTimeout(() => {
+        const email = paginatedEmails[focusedEmailIndex];
+        // Only select if different and valid
+        if (email && email.id !== selectedEmail) {
+          handleEmailSelect(email.id);
+        }
+      }, 250); // 250ms debounce to prevent lagging when scrolling fast
+
+      return () => clearTimeout(timer);
+    }
+  }, [focusedEmailIndex, navMode, paginatedEmails, selectedEmail, enableAutoSelect]);
+
   // Helper label hiển thị
   const getMailboxLabel = (mailbox: any) => {
     return getMailboxLabelVN(mailbox);
@@ -1502,6 +1637,7 @@ export default function Inbox() {
               selectedMailbox={selectedMailbox}
               mailboxOrder={mailboxOrder}
               getMailboxIcon={getMailboxIcon}
+              focusedMailboxId={focusedMailboxId}
               getMailboxLabel={getMailboxLabel}
               mailboxesLoading={mailboxesLoading}
               mailboxesError={mailboxesError}
@@ -1537,9 +1673,10 @@ export default function Inbox() {
                 onSearch={handleSearch}
                 isLoading={isSearching}
                 onClear={handleClearSearch}
-                placeholder="Tìm email (typo-tolerant)..."
+                placeholder="Tìm kiếm..."
                 label={selectedMailbox}
                 showModeSelector={true}
+                value={searchQuery}
               />
             </div>
 
@@ -1850,8 +1987,8 @@ export default function Inbox() {
           </div>
 
           {/* ===== EMAIL LIST ===== */}
-          <div className="flex flex-col h-full">
-            <div ref={emailListRef} className="flex-1">
+          <div className="flex flex-col h-full overflow-hidden">
+            <div ref={emailListRef} className="flex-1 overflow-hidden">
               {/* 🔍 SEARCH RESULTS MODE */}
               {isInSearchMode ? (
                 <SearchResultsList
@@ -2184,6 +2321,14 @@ export default function Inbox() {
         onCancel={handleCancelDelete}
         isDangerous={true}
       />
+
+      {/* Keyboard Shortcuts Help */}
+      <KeyboardShortcutsHelp
+        isOpen={showKeyboardHelp}
+        onClose={() => setShowKeyboardHelp(false)}
+      />
+
+      <KeyboardShortcutsButton onClick={() => setShowKeyboardHelp(true)} />
     </div>
   );
 }

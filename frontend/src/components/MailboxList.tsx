@@ -11,6 +11,7 @@ interface MailboxListProps {
   mailboxesLoading: boolean;
   mailboxesError: any;
   onSelect: (mailboxId: string) => void;
+  focusedMailboxId?: string | null;
 }
 
 const MailboxList: React.FC<MailboxListProps> = ({
@@ -22,6 +23,7 @@ const MailboxList: React.FC<MailboxListProps> = ({
   mailboxesLoading,
   mailboxesError,
   onSelect,
+  focusedMailboxId,
 }) => {
   return (
     <div className="px-2 pb-2">
@@ -55,13 +57,16 @@ const MailboxList: React.FC<MailboxListProps> = ({
             )
             .map((mailbox: any) => {
               const isSelected = selectedMailbox === mailbox.id;
+              const isFocused = focusedMailboxId === mailbox.id;
               return (
                 <li
                   key={mailbox.id}
                   className="mailbox-item cursor-pointer rounded-lg transition-all"
                   style={{
-                    backgroundColor: isSelected ? 'var(--accent-secondary)' : 'transparent',
+                    backgroundColor: isSelected ? 'var(--accent-secondary)' : (isFocused ? 'var(--bg-hover)' : 'transparent'),
                     color: isSelected ? 'var(--accent-primary)' : 'var(--text-primary)',
+                    outline: isFocused && !isSelected ? '2px solid var(--accent-primary)' : 'none',
+                    outlineOffset: '-2px',
                   }}
                   onMouseEnter={(e) => {
                     if (!isSelected) {

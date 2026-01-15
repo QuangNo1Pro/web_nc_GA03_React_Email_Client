@@ -63,23 +63,28 @@ const EmailRow: React.FC<EmailRowProps> = ({ index, style, data }) => {
     avatarColorName = senderName;
   }
 
+  const isFocused = index === focusedEmailIndex;
+
   return (
     <>
       <div
-        style={{ ...style }}
+        style={{
+          ...style,
+          zIndex: isFocused ? 10 : "auto",
+        }}
         className={`group relative w-full flex items-center px-4 cursor-pointer 
           transition-colors duration-150 
           ${selectedEmail === email.id
             ? "bg-[var(--accent-secondary)]"
-            : "bg-[var(--bg-primary)]"}
+            : (isFocused ? "bg-[var(--bg-hover)]" : "bg-[var(--bg-primary)]")} 
           hover:bg-[var(--bg-hover)]
           border-b border-[var(--border-primary)]
         `}
         onClick={() => handleEmailSelect(email.id)}
       >
-        {/* Line xanh bên trái khi chưa đọc */}
+        {/* Unread Indicator Bar */}
         {isUnread && (
-          <div className="absolute left-0 top-0 h-full w-1 bg-[var(--accent-primary)] rounded-r-sm" />
+          <div className="absolute left-0 top-0 h-full w-1 bg-[var(--accent-primary)] rounded-r-sm opacity-80" />
         )}
 
         {/* Avatar / Checkbox */}

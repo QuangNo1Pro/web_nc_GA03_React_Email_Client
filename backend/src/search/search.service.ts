@@ -41,6 +41,49 @@ export class SearchService {
   ) { }
 
   /**
+   * 🇻🇳 Normalize Vietnamese text by removing diacritics
+   * Allows "quan" to match "Quân", "nguyen" to match "Nguyễn"
+   */
+  private normalizeVietnamese(text: string): string {
+    if (!text) return '';
+    return text
+      .normalize('NFD') // Decompose into base char + combining marks
+      .replace(/[\u0300-\u036f]/g, '') // Remove combining diacritical marks
+      .replace(/đ/g, 'd') // Handle đ separately
+      .replace(/Đ/g, 'D')
+      .toLowerCase();
+  }
+
+  /**
+   * 🧹 Strip HTML tags and extract plain text
+   * Handles complex email HTML with style/script removal
+   */
+  private stripHtml(html: string): string {
+    if (!html) return '';
+
+    let text = html;
+    // Remove style tags and content
+    text = text.replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '');
+    // Remove script tags and content
+    text = text.replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '');
+    // Remove HTML comments (including conditional comments)
+    text = text.replace(/<!--[\s\S]*?-->/g, '');
+    // Remove all HTML tags
+    text = text.replace(/<[^>]+>/g, ' ');
+    // Decode HTML entities
+    text = text.replace(/&nbsp;/g, ' ');
+    text = text.replace(/&amp;/g, '&');
+    text = text.replace(/&lt;/g, '<');
+    text = text.replace(/&gt;/g, '>');
+    text = text.replace(/&quot;/g, '"');
+    // Collapse whitespace
+    text = text.replace(/\s+/g, ' ').trim();
+
+    return text;
+  }
+
+
+  /**
    * 🔍 Thực hiện fuzzy search trên emails của user
    * - Hỗ trợ typo tolerance
    * - Hỗ trợ partial match
@@ -64,12 +107,17 @@ export class SearchService {
         if (label === 'UNREAD') {
           // UNREAD là virtual label - không phải Gmail label
           filter.unread = true;
+          // Loại bỏ Trash và Spam
+          filter.labelIds = { $nin: ['TRASH', 'SPAM'] };
         } else if (label === 'STARRED') {
           // STARRED là virtual label
           filter.starred = true;
+          // Loại bỏ Trash và Spam
+          filter.labelIds = { $nin: ['TRASH', 'SPAM'] };
         } else if (label === 'ALL_MAIL') {
           // ALL_MAIL không lọc gì, lấy tất cả emails của user
-          // (giữ nguyên filter chỉ có userId)
+          // NHƯNG thường All Mail cũng không bao gồm Trash/Spam
+          filter.labelIds = { $nin: ['TRASH', 'SPAM'] };
         } else {
           // Gmail labels: INBOX, SENT, DRAFT, TRASH, SPAM, etc.
           // labelIds là array, nên dùng $in để check nếu label có trong array
@@ -90,60 +138,113 @@ export class SearchService {
       }
 
       // 🔍 Extract sender + subject from payload headers cho Fuse search
+      // Also add normalized (no-accent) versions for Vietnamese support
       const enrichedEmails = emails.map((email) => {
         const { sender, subject } = this.extractEmailInfo(email);
+        // Use textContent (full body) if available, fallback to snippet
+        // Use textContent (full body) if available, fallback to snippet
+        const rawContent = (email as any).textContent || email.snippet || '';
+        // 🧹 Clean HTML tags to get plain text for better search matching
+        const bodyContent = this.stripHtml(rawContent);
+
         return {
           ...email,
           sender,
           subject,
+          bodyContent: bodyContent.slice(0, 10000), // Limit raw body size too
+          // Normalized versions for accent-insensitive search
+          senderNorm: this.normalizeVietnamese(sender),
+          subjectNorm: this.normalizeVietnamese(subject),
+          bodyContentNorm: this.normalizeVietnamese(bodyContent.slice(0, 5000)), // Limit to 5000 chars for performance
         };
       });
 
-      // 2️⃣ Build Fuse.js index (cache theo userId:label để tránh xung đột)
+      // 2️⃣ Build 3 separate Fuse.js indexes for MAX score logic
+      // Instead of weighted average, we search each field separately and take the BEST score
       const cacheKey = `${userId}:${label || 'ALL'}`;
-      let fuse = this.fuseInstances.get(cacheKey);
 
-      if (!fuse) {
-        fuse = new Fuse(enrichedEmails, {
-          keys: [
-            { name: 'subject', weight: 0.7 }, // Subject quan trọng hơn
-            { name: 'sender', weight: 0.6 },
-            { name: 'snippet', weight: 0.4 },
-            { name: 'textContent', weight: 0.3 }, // Search in full text content
-          ],
-          threshold: 0.4, // 🧪 0.4 = typo tolerance (0=exact, 1=loose)
-          ignoreLocation: true,
-          minMatchCharLength: 2,
-          includeScore: true,
-          includeMatches: true,
+      const fuseConfig = {
+        threshold: 0.6, // Per-field threshold (relaxed from 0.5)
+        ignoreLocation: true,
+        minMatchCharLength: 2,
+        includeScore: true,
+        includeMatches: true,
+      };
+
+      // Create Fuse instances for each field group
+      const fuseSubject = new Fuse(enrichedEmails, {
+        ...fuseConfig,
+        keys: ['subject', 'subjectNorm'],
+      });
+
+      const fuseSender = new Fuse(enrichedEmails, {
+        ...fuseConfig,
+        keys: ['sender', 'senderNorm'],
+      });
+
+      const fuseBody = new Fuse(enrichedEmails, {
+        ...fuseConfig,
+        keys: ['bodyContent', 'bodyContentNorm'],
+      });
+
+      this.logger.log(`[Search] Built 3 Fuse indexes for ${cacheKey} (MAX score logic)`);
+
+      // 3️⃣ Search each field separately with both original and normalized query
+      const normalizedQuery = this.normalizeVietnamese(query);
+      const queries = [query];
+      if (normalizedQuery !== query) queries.push(normalizedQuery);
+
+      // Search all 3 fields
+      const subjectResults: any[] = [];
+      const senderResults: any[] = [];
+      const bodyResults: any[] = [];
+
+      queries.forEach(q => {
+        subjectResults.push(...fuseSubject.search(q));
+        senderResults.push(...fuseSender.search(q));
+        bodyResults.push(...fuseBody.search(q));
+      });
+
+      // 4️⃣ Merge results: for each email, take the BEST (lowest) score across all fields
+      const bestScoreMap = new Map<string, { score: number; item: any; matchedField: string }>();
+
+      const processResults = (results: any[], fieldName: string) => {
+        results.forEach(r => {
+          const id = r.item.messageId;
+          const score = r.score || 1;
+          const existing = bestScoreMap.get(id);
+
+          if (!existing || score < existing.score) {
+            bestScoreMap.set(id, { score, item: r.item, matchedField: fieldName });
+          }
         });
-        this.fuseInstances.set(cacheKey, fuse);
-        this.logger.log(`[Search] Built Fuse index for ${cacheKey}`);
-      } else {
-        this.logger.log(`[Search] Using cached Fuse index for ${cacheKey}`);
-      }
+      };
 
-      // 3️⃣ Thực hiện search
-      const searchResults = fuse.search(query);
-      this.logger.log(`[Search] Query "${query}" in ${cacheKey}: Found ${searchResults.length} matches`);
+      processResults(subjectResults, 'subject');
+      processResults(senderResults, 'sender');
+      processResults(bodyResults, 'body');
 
-      // 4️⃣ Format kết quả
+      // 5️⃣ Filter by MAX score threshold and sort
+      const MAX_SCORE_THRESHOLD = 0.5; // Consistent with fuse threshold
+      const searchResults = Array.from(bestScoreMap.values())
+        .filter(r => r.score <= MAX_SCORE_THRESHOLD)
+        .sort((a, b) => a.score - b.score);
+
+      this.logger.log(`[Search] Query "${query}" in ${cacheKey}: Subject=${subjectResults.length}, Sender=${senderResults.length}, Body=${bodyResults.length} → ${searchResults.length} after MAX score filter`);
+
+      // 6️⃣ Format kết quả
       const results: SearchResult[] = searchResults
         .slice(offset, offset + limit)
         .map((result) => {
-          const matchedFields = (result.matches
-            ?.map((m) => m.key)
-            .filter((v, i, a) => a.indexOf(v) === i) || []) as string[];
-
           const { sender, subject } = this.extractEmailInfo(result.item);
 
           return {
-            id: result.item.messageId, // Use messageId (Gmail message ID)
+            id: result.item.messageId,
             sender,
             subject,
             snippet: result.item.snippet || '',
-            score: result.score || 0, // 0=perfect match, 1=no match
-            matchedFields,
+            score: result.score, // 0=perfect match, 1=no match
+            matchedFields: [result.matchedField], // Which field had the best match
           };
         });
 
@@ -171,9 +272,17 @@ export class SearchService {
       // 1. Determine candidate emails based on filters (Label, etc.)
       const filter: any = { userId };
       if (label) {
-        if (label === 'UNREAD') filter.unread = true;
-        else if (label === 'STARRED') filter.starred = true;
-        else if (label !== 'ALL_MAIL') filter.labelIds = { $in: [label] };
+        if (label === 'UNREAD') {
+          filter.unread = true;
+          filter.labelIds = { $nin: ['TRASH', 'SPAM'] };
+        } else if (label === 'STARRED') {
+          filter.starred = true;
+          filter.labelIds = { $nin: ['TRASH', 'SPAM'] };
+        } else if (label === 'ALL_MAIL') {
+          filter.labelIds = { $nin: ['TRASH', 'SPAM'] };
+        } else {
+          filter.labelIds = { $in: [label] };
+        }
       }
 
       // Fetch ONLY messageIds to minimize data transfer
@@ -251,8 +360,8 @@ export class SearchService {
       scored.sort((a, b) => b.similarity - a.similarity);
 
       // Phase 1: High Recall Retrieval
-      // Lower threshold to catch more potential candidates (Recall)
-      const MIN_SIMILARITY = 0.25;
+      // Use moderate threshold to balance recall and precision
+      const MIN_SIMILARITY = 0.40; // Increased from 0.25 to reduce noise
       const filtered = scored.filter(s => s.similarity >= MIN_SIMILARITY);
 
       this.logger.log(`[SemanticSearch] Recall Phase: "${query}" found ${filtered.length} candidates > ${MIN_SIMILARITY}`);
@@ -284,16 +393,25 @@ export class SearchService {
           content
         };
       }).filter(Boolean) as { id: string; content: string }[];
+
       // Call reranker
       const rankedIds = await this.geminiService.rerankSearchResults(query, rerankItems);
-      this.logger.log(`[SemanticSearch] Reranker returned ${rankedIds.length} sorted IDs`);
+
+      // If reranker failed/returned all items (quota issue), limit to top 10 by similarity
+      const MAX_FALLBACK_RESULTS = 10;
+      const isLikelyFallback = rankedIds.length === rerankItems.length && rankedIds.length > MAX_FALLBACK_RESULTS;
+      const finalRankedIds = isLikelyFallback
+        ? rankedIds.slice(0, MAX_FALLBACK_RESULTS)
+        : rankedIds;
+
+      this.logger.log(`[SemanticSearch] Reranker returned ${rankedIds.length} IDs${isLikelyFallback ? ` (limited to ${MAX_FALLBACK_RESULTS} due to fallback)` : ''}`);
 
       // Map back to results
       const results: SearchResult[] = [];
       const addedIds = new Set<string>();
 
       // 1. Add ranked items first
-      for (const id of rankedIds) {
+      for (const id of finalRankedIds) {
         const email = emailMap.get(id);
         const originalScore = topCandidates.find(c => c.messageId === id)?.similarity || 0;
 
