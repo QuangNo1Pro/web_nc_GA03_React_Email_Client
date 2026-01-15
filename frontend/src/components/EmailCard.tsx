@@ -228,10 +228,9 @@ const EmailCard: React.FC<EmailCardProps> = ({ email, borderColor, onSnooze, onO
               ) : localSummary ? (
                 /* AI Summary - scrollable */
                 <div
-                  className="text-sm text-gray-700 leading-relaxed max-h-32 overflow-y-auto pr-2 custom-scrollbar"
+                  className="text-sm text-gray-700 leading-relaxed pr-2"
                   style={{
                     wordBreak: 'break-word',
-                    whiteSpace: 'pre-wrap'
                   }}
                 >
                   {localSummary}

@@ -1157,16 +1157,48 @@ export class GmailService {
       };
     }
 
-    // 3. Extract FULL email body (not snippet!)
-    let emailBody = await this.extractFullEmailBody(email);
+    // 3. ALWAYS Fetch full email body from Gmail API to ensure we have the complete content
+    // ignoring what's in the DB (which might be just a snippet)
+    let emailBody = '';
+    try {
+      this.logger.log(`[AI Summary] 🔄 Fetching full content from Gmail API...`);
+      const gmail = await this.getGmailClient(userId);
+      const fullMsg = await gmail.users.messages.get({
+        userId: 'me',
+        id: messageId,
+        format: 'full',
+      });
 
-    // 4. Clean HTML and extract plain text
-    const cleanedText = this.summarizationService.cleanHtmlToText(emailBody);
+      if (fullMsg.data.payload) {
+        // Update local email object
+        email.payload = fullMsg.data.payload;
+        if (fullMsg.data.labelIds) email.labelIds = fullMsg.data.labelIds;
 
-    // CRITICAL: Validate minimum content length (100 chars for meaningful summary)
-    if (!cleanedText || cleanedText.trim().length < 100) {
+        // Extract body from the fresh payload
+        const rawBody = await this.extractFullEmailBody(email);
+        const cleanedText = this.summarizationService.cleanHtmlToText(rawBody);
+
+        // Save to DB
+        await this.usersService.updateEmail(userId, messageId, {
+          payload: fullMsg.data.payload,
+          textContent: cleanedText,
+          labelIds: email.labelIds
+        });
+
+        emailBody = cleanedText;
+        this.logger.log(`[AI Summary] ✅ Fetched and saved full content (${emailBody.length} chars).`);
+      }
+    } catch (error: any) {
+      this.logger.error(`[AI Summary] ⚠️ Failed to fetch full content from Gmail: ${error.message}. Falling back to DB content.`);
+      // Fallback: try to use existing DB content
+      const rawBody = await this.extractFullEmailBody(email);
+      emailBody = this.summarizationService.cleanHtmlToText(rawBody);
+    }
+
+    // 4. Validate content length
+    if (!emailBody || emailBody.trim().length < 100) {
       this.logger.warn(
-        `[AI Summary] ❌ Email body too short (${cleanedText?.length || 0} chars). Minimum 100 chars required.`
+        `[AI Summary] ❌ Email body too short (${emailBody?.length || 0} chars). Minimum 100 chars required.`
       );
 
       // Return meaningful rejection message instead of using snippet
@@ -1182,8 +1214,7 @@ export class GmailService {
       };
     }
 
-    emailBody = cleanedText;
-    this.logger.log(`[AI Summary] Cleaned email body length: ${emailBody.length} characters`);
+    this.logger.log(`[AI Summary] Final content length for summarization: ${emailBody.length} characters`);
 
     // 5. Generate summary using Summarization Service
     const summary = await this.summarizationService.summarizeEmail(emailBody);
@@ -2192,19 +2223,61 @@ export class GmailService {
    */
   async summarizeEmail(userId: string, messageId: string) {
     try {
-      // Get email details
-      const emailData = await this.getEmail(userId, messageId);
+      // 1. ALWAYS Fetch full email body from Gmail API to ensure we have the complete content
+      // ignoring what's in the DB (which might be just a snippet)
+      let content = '';
+      let subject = '(No subject)';
 
-      const subject = emailData.headers?.subject || '(No subject)';
-      const body = emailData.body || '';
-      const snippet = emailData.snippet || '';
+      try {
+        this.logger.log(`[AI Summary] 🔄 Fetching full content from Gmail API for ${messageId}...`);
+        const gmail = await this.getGmailClient(userId);
+        const fullMsg = await gmail.users.messages.get({
+          userId: 'me',
+          id: messageId,
+          format: 'full',
+        });
 
-      // Try to get content from body, fallback to snippet
-      let content = body;
-      if (!content || content.trim().length < 10) {
-        content = snippet;
+        if (fullMsg.data.payload) {
+          // Update local email object
+          const labelIds = fullMsg.data.labelIds || [];
+
+          // Extract body from the fresh payload
+          const emailForExtract = { payload: fullMsg.data.payload };
+          const rawBody = await this.extractFullEmailBody(emailForExtract);
+          const cleanedText = this.summarizationService.cleanHtmlToText(rawBody);
+
+          // Parse headers
+          const headers = this.parseHeaders(fullMsg.data.payload.headers || []);
+          subject = headers['subject'] || '(No subject)';
+
+          // Save to DB
+          await this.usersService.updateEmail(userId, messageId, {
+            payload: fullMsg.data.payload,
+            textContent: cleanedText,
+            labelIds: labelIds,
+            snippet: fullMsg.data.snippet
+          });
+
+          content = cleanedText;
+          this.logger.log(`[AI Summary] ✅ Fetched and saved full content (${content.length} chars).`);
+        }
+      } catch (gmailError: any) {
+        this.logger.error(`[AI Summary] ⚠️ Failed to fetch full content from Gmail: ${gmailError.message}. Falling back to DB content.`);
+
+        // Fallback: Get email details from DB
+        const emailData = await this.getEmail(userId, messageId);
+        subject = emailData.headers?.subject || '(No subject)';
+        const body = emailData.body || '';
+        const snippet = emailData.snippet || '';
+
+        // Try to get content from body, fallback to snippet
+        content = body;
+        if (!content || content.trim().length < 10) {
+          content = snippet;
+        }
       }
 
+      // Check content constraints
       if (!content || content.trim().length < 10) {
         // Return a default summary for empty emails
         const defaultSummary = 'Email không có nội dung hoặc chỉ chứa hình ảnh/tệp đính kèm.';

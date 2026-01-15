@@ -71,14 +71,14 @@ export class GeminiService implements OnModuleInit {
     // 1. Try Gemini AI via REST API
     if (this.hasApiKey) {
       try {
-        const prompt = `Hãy tóm tắt email sau đây bằng tiếng Việt trong 2-3 câu hoàn chỉnh.
+        const prompt = `Hãy tóm tắt nội dung chính của email này bằng tiếng Việt trong đúng 1 câu duy nhất, ngắn gọn và tổng quát nhất có thể.
 
 Tiêu đề: ${subject}
 
 Nội dung email:
 ${truncatedInput}
 
-Tóm tắt (viết đầy đủ, không cắt giữa câu):`;
+Tóm tắt (1 câu duy nhất):`;
 
         const response = await fetch(
           `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${this.apiKey}`,
@@ -128,14 +128,14 @@ Tóm tắt (viết đầy đủ, không cắt giữa câu):`;
       console.log(`Debug: Calling Custom AI at ${customAiUrl}`); // Direct console log for visibility
 
       try {
-        const prompt = `Hãy tóm tắt email sau đây bằng tiếng Việt trong 2-3 câu hoàn chỉnh.
+        const prompt = `Hãy tóm tắt nội dung chính của email này bằng tiếng Việt trong đúng 1 câu duy nhất, ngắn gọn và tổng quát nhất có thể.
 
 Tiêu đề: ${subject}
 
 Nội dung email:
 ${truncatedInput}
 
-Tóm tắt (viết đầy đủ, không cắt giữa câu):`;
+Tóm tắt (1 câu duy nhất):`;
 
         // Log headers for debugging
         this.logger.debug('Sending aggressive headers to bypass Ngrok...');
