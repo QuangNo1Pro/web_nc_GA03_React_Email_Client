@@ -12,7 +12,7 @@ import React, { useCallback, useState } from 'react';
 import { useEmails } from '../hooks/useEmails';
 import { useKanbanColumns } from '../hooks/useKanbanColumns';
 import { KanbanDndProvider } from '../contexts/KanbanDndContext';
-import { EmailStatus } from '../types/email';
+import { EmailStatus, KanbanColumn as IKanbanColumn } from '../types/email';
 import KanbanColumn from './KanbanColumn';
 import KanbanSettingsModal from './KanbanSettingsModal';
 import { snoozeEmail as snoozeEmailAPI, fetchEmail } from '../services/emailService';
@@ -259,11 +259,11 @@ const KanbanBoard: React.FC<{
   // FEATURE III: Pass handleSnooze callback to columns
 
   // Fallback columns in case useEmails hook hasn't loaded yet
-  const fallbackColumns = [
-    { id: 'Inbox' as const, title: 'Inbox', color: 'border-l-blue-500', emails: [] },
-    { id: 'To Do' as const, title: 'To Do', color: 'border-l-yellow-500', emails: [] },
-    { id: 'In Progress' as const, title: 'In Progress', color: 'border-l-purple-500', emails: [] },
-    { id: 'Done' as const, title: 'Done', color: 'border-l-green-500', emails: [] },
+  const fallbackColumns: IKanbanColumn[] = [
+    { id: 'Inbox', title: 'Inbox', color: 'border-l-blue-500', emails: [], gmailLabel: 'INBOX' },
+    { id: 'To Do', title: 'To Do', color: 'border-l-yellow-500', emails: [], gmailLabel: 'STARRED' },
+    { id: 'In Progress', title: 'In Progress', color: 'border-l-orange-500', emails: [], gmailLabel: 'IMPORTANT' },
+    { id: 'Done', title: 'Done', color: 'border-l-green-500', emails: [], gmailLabel: 'ARCHIVED' },
   ];
 
   const activeColumns = columns && columns.length > 0 ? columns : fallbackColumns;
@@ -272,6 +272,92 @@ const KanbanBoard: React.FC<{
   const normalizeAndFilterSortEmails = (emails: any[]) => {
     let arr = emails.map(result => {
       const existingEmail = allEmails.find(e => e.id === result.id);
+
+      // Infer status from labelIds if not found in existing emails
+      // CRITICAL FIX: Ensure status matches one of the active columns exactly
+      const defaultStatus = activeColumns.find(c => c.gmailLabel === 'INBOX')?.id || activeColumns[0]?.id || 'Inbox';
+      let status = existingEmail?.status;
+
+      // Validate if current status exists in active columns
+      const isValidStatus = status && activeColumns.some(c => c.id === status);
+
+      // If status is missing or invalid (e.g. 'Inbox' vs 'inbox'), try to rescue it
+      if (!isValidStatus) {
+        // 1. Try case-insensitive match
+        const caseMatch = activeColumns.find(c => c.id.toLowerCase() === status?.toLowerCase());
+        if (caseMatch) {
+          status = caseMatch.id;
+        } else {
+          // 2. Fallback to default
+          status = defaultStatus;
+        }
+      }
+
+      // If we still don't have a valid existing status (or we just reset it), 
+      // OR if we want to ensure search results respect labels even if they have a legacy status:
+      // We should check labels if we are in a "rescue" scenario or if it's a new email
+      const shouldInfer = !isValidStatus || !existingEmail;
+
+      const resultLabelIds = result.labelIds;
+      if (shouldInfer && resultLabelIds && resultLabelIds.length > 0) {
+        // Priority Logic matching useEmails.ts
+
+        // 1. TRASH
+        const trashCol = activeColumns.find(c => c.gmailLabel === 'TRASH');
+        if (trashCol && resultLabelIds.includes('TRASH')) status = trashCol.id;
+
+        // 2. SPAM
+        else if (activeColumns.some(c => c.gmailLabel === 'SPAM' && resultLabelIds.includes('SPAM'))) {
+          status = activeColumns.find(c => c.gmailLabel === 'SPAM')!.id;
+        }
+
+        // 3. ARCHIVED
+        else if (activeColumns.some(c => c.gmailLabel === 'ARCHIVED') &&
+          !resultLabelIds.includes('INBOX') &&
+          !resultLabelIds.includes('TRASH') &&
+          !resultLabelIds.includes('SPAM') &&
+          !resultLabelIds.includes('DRAFT') &&
+          !resultLabelIds.includes('SENT')) {
+          status = activeColumns.find(c => c.gmailLabel === 'ARCHIVED')!.id;
+        }
+
+        // 4. IMPORTANT (In Progress)
+        else if (resultLabelIds.includes('IMPORTANT') && resultLabelIds.includes('INBOX')) {
+          const impCol = activeColumns.find(c => c.gmailLabel === 'IMPORTANT');
+          if (impCol) status = impCol.id;
+        }
+
+        // 5. STARRED (To Do)
+        else if (resultLabelIds.includes('STARRED') && resultLabelIds.includes('INBOX')) {
+          const starCol = activeColumns.find(c => c.gmailLabel === 'STARRED');
+          if (starCol) status = starCol.id;
+        }
+
+        // 6. Other Custom Labels
+        else {
+          const customCol = activeColumns.find(col =>
+            col.gmailLabel &&
+            !['INBOX', 'ARCHIVED', 'STARRED', 'IMPORTANT', 'TRASH', 'SPAM'].includes(col.gmailLabel) &&
+            resultLabelIds.includes(col.gmailLabel)
+          );
+          if (customCol) status = customCol.id;
+        }
+      }
+
+      // LOG ONCE (for the first email only) to avoid console spam
+      if (emails.indexOf(result) === 0) {
+        console.log('[KanbanBoard] Debug First Email:', {
+          id: result.id,
+          subject: result.subject,
+          labelIds: resultLabelIds,
+          hasExisting: !!existingEmail,
+          existingStatus: existingEmail?.status,
+          defaultStatus: defaultStatus,
+          finalStatus: status,
+          activeColumnsIds: activeColumns.map(c => c.id)
+        });
+      }
+
       return {
         id: result.id || result._id || '',
         sender: result.sender || 'Unknown',
@@ -283,7 +369,7 @@ const KanbanBoard: React.FC<{
         starred: result.starred ?? false,
         score: result.score,
         matchedFields: result.matchedFields,
-        status: existingEmail?.status || 'Inbox',
+        status: status,
         attachments: result.attachments || existingEmail?.attachments || [],
         ...result,
       };
@@ -316,44 +402,43 @@ const KanbanBoard: React.FC<{
     }
   });
 
-  const displayColumns = isSearchMode && filteredEmails
-    ? activeColumns.map(col => {
-      const emailsForCol = normalizedFilteredEmails.filter(e => e.status === col.id);
-      return {
-        ...col,
-        emails: emailsForCol,
-      };
-    })
-    : activeColumns.map(col => {
-      // Áp dụng filter/sort cho emails từng cột khi không search
-      let emails = col.emails;
-      if (filterUnread) emails = emails.filter(e => !e.read);
-      if (filterHasAttachment) emails = emails.filter(e => (e.attachments && e.attachments.length > 0));
-      if (filterSender.trim()) emails = emails.filter(e => e.sender?.toLowerCase().includes(filterSender.trim().toLowerCase()));
-      emails = emails.slice();
-      emails.sort((a, b) => {
-        if (sortOption === 'date-desc') return b.timestamp - a.timestamp;
-        if (sortOption === 'date-asc') return a.timestamp - b.timestamp;
-        if (sortOption === 'sender-asc') return (a.sender || '').localeCompare(b.sender || '');
-        if (sortOption === 'sender-desc') return (b.sender || '').localeCompare(a.sender || '');
-        return 0;
+  const displayColumns = (() => {
+    const columnsToDisplay = isSearchMode && filteredEmails
+      ? activeColumns.map(col => {
+        const emailsForCol = normalizedFilteredEmails.filter(e => e.status === col.id);
+        return {
+          ...col,
+          emails: emailsForCol,
+        };
+      })
+      : activeColumns.map(col => {
+        // Áp dụng filter/sort cho emails từng cột khi không search
+        let emails = col.emails;
+        if (filterUnread) emails = emails.filter(e => !e.read);
+        if (filterHasAttachment) emails = emails.filter(e => (e.attachments && e.attachments.length > 0));
+        if (filterSender.trim()) emails = emails.filter(e => e.sender?.toLowerCase().includes(filterSender.trim().toLowerCase()));
+        emails = emails.slice();
+        emails.sort((a, b) => {
+          if (sortOption === 'date-desc') return b.timestamp - a.timestamp;
+          if (sortOption === 'date-asc') return a.timestamp - b.timestamp;
+          if (sortOption === 'sender-asc') return (a.sender || '').localeCompare(b.sender || '');
+          if (sortOption === 'sender-desc') return (b.sender || '').localeCompare(a.sender || '');
+          return 0;
+        });
+        return { ...col, emails };
       });
-      return { ...col, emails };
-    });
 
-  // If in search mode with filtered emails, organize them into columns by status
-  // Search results don't have status field, so distribute them across all columns evenly
-  // or show all in INBOX by default
-  console.log('[KanbanBoard] Render:', {
-    isSearchMode,
-    filteredEmailsCount: filteredEmails?.length,
-    columnsCount: columns?.length,
-    displayColumnsCount: displayColumns.length,
-    columnsIds: columns?.map(c => c.id),
-    displayCondition: isSearchMode && filteredEmails,
-    displayColumnsInbox: displayColumns.find(c => c.id === 'Inbox')?.emails?.length || 0,
-    filteredEmailsSample: filteredEmails?.slice(0, 2)
-  });
+    console.log('[KanbanBoard] Columns Distribution:', columnsToDisplay.map(c => ({
+      id: c.id,
+      gmailLabel: c.gmailLabel,
+      emailCount: c.emails.length,
+      firstEmailStatus: c.emails[0]?.status
+    })));
+
+    return columnsToDisplay;
+  })();
+
+
 
   return (
     <div className="flex flex-col h-full w-full bg-[var(--bg-primary)]">

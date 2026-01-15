@@ -25,6 +25,7 @@ export interface SearchResult {
   snippet: string;
   score: number; // 0-1, 1 là perfect match
   matchedFields: string[]; // ['subject', 'sender', 'body']
+  labelIds?: string[]; // Added: return labelIds for frontend to determine status
 }
 
 @Injectable()
@@ -245,6 +246,7 @@ export class SearchService {
             snippet: result.item.snippet || '',
             score: result.score, // 0=perfect match, 1=no match
             matchedFields: [result.matchedField], // Which field had the best match
+            labelIds: result.item.labelIds || [], // Added: return labelIds
           };
         });
 
@@ -288,7 +290,7 @@ export class SearchService {
       // Fetch ONLY messageIds to minimize data transfer
       const candidateEmails = await this.emailModel
         .find(filter)
-        .select('messageId')
+        .select('messageId labelIds')
         .lean()
         .exec();
 
@@ -373,7 +375,7 @@ export class SearchService {
       const candidateIds = topCandidates.map(c => c.messageId);
       const emailDetails = await this.emailModel
         .find({ userId, messageId: { $in: candidateIds } })
-        .select('messageId snippet payload')
+        .select('messageId snippet payload labelIds')
         .lean()
         .exec();
 
@@ -424,6 +426,7 @@ export class SearchService {
             snippet: email.snippet || '',
             score: 1 - ((originalScore + 1) / 2),
             matchedFields: ['body', 'subject', 'semantic_rerank'],
+            labelIds: email.labelIds || [], // Added: return labelIds
           });
           addedIds.add(id);
         }
@@ -442,6 +445,7 @@ export class SearchService {
               snippet: email.snippet || '',
               score: 1 - ((candidate.similarity + 1) / 2),
               matchedFields: ['body', 'subject'],
+              labelIds: email.labelIds || [], // Added: return labelIds
             });
           }
         }

@@ -7,6 +7,7 @@ export interface SearchResult {
   snippet: string;
   score: number;
   matchedFields?: string[];
+  labelIds?: string[];
 }
 
 export interface SearchResponse {
