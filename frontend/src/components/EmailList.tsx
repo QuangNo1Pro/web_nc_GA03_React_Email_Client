@@ -59,6 +59,15 @@ const EmailList = forwardRef<EmailListHandle, EmailListProps>(({
     },
   }));
 
+  // Auto scroll to focused item
+  React.useEffect(() => {
+    if (listRef.current && focusedEmailIndex >= 0) {
+      // scroll to item ensuring it's visible
+      // scroll to item ensuring it's visible
+      (listRef.current as any).scrollToItem(focusedEmailIndex, 'smart');
+    }
+  }, [focusedEmailIndex]);
+
   return (
     <div className="h-full">
       <FixedSizeList

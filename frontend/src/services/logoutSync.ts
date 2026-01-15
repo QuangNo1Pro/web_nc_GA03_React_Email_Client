@@ -33,12 +33,12 @@ class LogoutSyncService {
     try {
       if (typeof BroadcastChannel !== 'undefined') {
         this.channel = new BroadcastChannel('auth-sync');
-        
+
         // Listen for messages from other tabs
         this.channel.onmessage = (event: MessageEvent<LogoutSyncMessage>) => {
           this.handleMessage(event.data);
         };
-        
+
         this.isInitialized = true;
         console.log('[LogoutSync] 📡 BroadcastChannel initialized. Tab ID:', this.tabId);
       } else {
@@ -96,6 +96,11 @@ class LogoutSyncService {
    * Broadcast logout event to all other tabs
    */
   public broadcastLogout(): void {
+    // Reinitialize channel if it was closed
+    if (!this.channel || !this.isInitialized) {
+      this.initializeBroadcastChannel();
+    }
+
     if (!this.isInitialized || !this.channel) {
       console.warn('[LogoutSync] ⚠️ BroadcastChannel not available, skipping logout broadcast');
       return;
@@ -112,6 +117,9 @@ class LogoutSyncService {
       console.log('[LogoutSync] 📤 Logout broadcast sent');
     } catch (error) {
       console.error('[LogoutSync] ❌ Failed to broadcast logout:', error);
+      // Try to reinitialize and resend
+      this.isInitialized = false;
+      this.channel = null;
     }
   }
 
@@ -119,6 +127,11 @@ class LogoutSyncService {
    * Broadcast login event to all other tabs
    */
   public broadcastLogin(userId: string): void {
+    // Reinitialize channel if it was closed
+    if (!this.channel || !this.isInitialized) {
+      this.initializeBroadcastChannel();
+    }
+
     if (!this.isInitialized || !this.channel) {
       console.warn('[LogoutSync] ⚠️ BroadcastChannel not available, skipping login broadcast');
       return;
@@ -136,6 +149,9 @@ class LogoutSyncService {
       console.log('[LogoutSync] 📤 Login broadcast sent for user:', userId);
     } catch (error) {
       console.error('[LogoutSync] ❌ Failed to broadcast login:', error);
+      // Try to reinitialize on next call
+      this.isInitialized = false;
+      this.channel = null;
     }
   }
 
@@ -143,6 +159,10 @@ class LogoutSyncService {
    * Broadcast token refresh event
    */
   public broadcastTokenRefresh(): void {
+    if (!this.channel || !this.isInitialized) {
+      this.initializeBroadcastChannel();
+    }
+
     if (!this.isInitialized || !this.channel) {
       return;
     }
@@ -157,6 +177,8 @@ class LogoutSyncService {
       this.channel.postMessage(message);
     } catch (error) {
       console.error('[LogoutSync] ❌ Failed to broadcast token refresh:', error);
+      this.isInitialized = false;
+      this.channel = null;
     }
   }
 
@@ -177,15 +199,14 @@ class LogoutSyncService {
   }
 
   /**
-   * Clean up resources
+   * Clean up callbacks only (don't close channel - it's a singleton)
    */
   public cleanup(): void {
-    if (this.channel) {
-      this.channel.close();
-      console.log('[LogoutSync] 🧹 BroadcastChannel cleaned up');
-    }
+    // Don't close the channel! It's a singleton and needs to stay alive
+    // Only clear the callbacks to prevent stale references
     this.onLogoutCallback = null;
     this.onLoginCallback = null;
+    console.log('[LogoutSync] 🧹 Callbacks cleaned up (channel stays open)');
   }
 
   /**

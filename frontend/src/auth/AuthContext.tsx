@@ -97,6 +97,9 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   }, [fetchUserProfile]);
 
   const login = async (response?: any) => {
+    // Set loading to true to prevent flash of login page during OAuth callback
+    setLoading(true);
+
     // Save token to memory logic if provided (from login response)
     if (response?.access_token) {
       setAccessToken(response.access_token);

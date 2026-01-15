@@ -12,10 +12,6 @@ interface SearchResultsListProps {
 
 /**
  * 📧 Hiển thị kết quả tìm kiếm dưới dạng vertical card list
- * - Loading state (spinner)
- * - Empty state (No results found)
- * - Error state (Error message)
- * - Results (Card list + back button)
  */
 export function SearchResultsList({
   results,
@@ -24,16 +20,18 @@ export function SearchResultsList({
   onBack,
   onSelectEmail,
 }: SearchResultsListProps) {
-  // Debug log
   console.log('[SearchResultsList] Rendered with state:', { isLoading, resultsCount: results.length, error });
 
   // 🔄 Loading state
   if (isLoading) {
     return (
       <div className="flex justify-center items-center h-96">
-        <div className="flex flex-col items-center gap-2">
-          <div className="w-8 h-8 border-4 border-transparent border-t-blue-500 rounded-full animate-spin" />
-          <span className="text-gray-500">Đang tìm kiếm...</span>
+        <div className="flex flex-col items-center gap-3">
+          <div
+            className="w-7 h-7 rounded-full animate-spin"
+            style={{ border: '2px solid var(--border-primary)', borderTopColor: 'var(--accent-primary)' }}
+          />
+          <span style={{ color: 'var(--text-secondary)', fontSize: '13px' }}>Đang tìm kiếm...</span>
         </div>
       </div>
     );
@@ -42,15 +40,17 @@ export function SearchResultsList({
   // ❌ Error state
   if (error) {
     return (
-      <div className="flex flex-col items-center justify-center h-96 gap-4">
-        <AlertCircle size={48} className="text-red-500" />
-        <p className="text-red-600 dark:text-red-400 font-medium">Lỗi tìm kiếm</p>
-        <p className="text-gray-600 dark:text-gray-400 text-sm">{error}</p>
+      <div className="flex flex-col items-center justify-center h-96 gap-3 px-4">
+        <AlertCircle size={40} style={{ color: '#ef4444' }} />
+        <p className="font-medium" style={{ color: 'var(--text-primary)', fontSize: '14px' }}>Lỗi tìm kiếm</p>
+        <p className="text-center" style={{ color: 'var(--text-secondary)', fontSize: '13px' }}>{error}</p>
         <button
           onClick={onBack}
-          className="mt-4 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+          className="mt-2 px-4 py-2 rounded-lg transition-colors flex items-center gap-2"
+          style={{ backgroundColor: 'var(--accent-primary)', color: 'white', fontSize: '13px' }}
         >
-          ← Quay lại Inbox
+          <ArrowLeft size={16} />
+          Quay lại Inbox
         </button>
       </div>
     );
@@ -59,94 +59,112 @@ export function SearchResultsList({
   // 🎯 Empty state
   if (results.length === 0) {
     return (
-      <div className="flex flex-col items-center justify-center h-96 gap-4">
-        <span className="text-4xl">🔍</span>
-        <p className="text-gray-600 dark:text-gray-400 font-medium">Không tìm thấy email</p>
+      <div className="flex flex-col items-center justify-center h-96 gap-3 px-4">
+        <span className="text-3xl">🔍</span>
+        <p className="font-medium" style={{ color: 'var(--text-primary)', fontSize: '14px' }}>Không tìm thấy email</p>
         <button
           onClick={onBack}
-          className="mt-4 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex items-center gap-2"
+          className="mt-2 px-4 py-2 rounded-lg transition-colors flex items-center gap-2"
+          style={{ backgroundColor: 'var(--accent-primary)', color: 'white', fontSize: '13px' }}
         >
-          <ArrowLeft size={18} />
+          <ArrowLeft size={16} />
           Quay lại Inbox
         </button>
       </div>
     );
   }
 
-  // ✅ Results state
+  // ✅ Results state - card style với căn chỉnh tốt hơn
   return (
-    <div className="space-y-4">
+    <div className="h-full flex flex-col">
       {/* Header */}
-      <div className="flex items-center justify-between mb-4">
+      <div
+        className="flex items-center justify-between px-3 py-2 border-b"
+        style={{ borderColor: 'var(--border-primary)' }}
+      >
         <button
           onClick={onBack}
-          className="flex items-center gap-2 px-3 py-2 text-blue-600 dark:text-blue-400 hover:bg-gray-100 dark:hover:bg-gray-700 rounded transition-colors"
+          className="flex items-center gap-1.5 px-2 py-1.5 rounded-md transition-colors"
+          style={{ color: 'var(--accent-primary)', fontSize: '13px' }}
+          onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = 'var(--bg-hover)'; }}
+          onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'transparent'; }}
         >
-          <ArrowLeft size={20} />
-          <span>Quay lại Inbox</span>
+          <ArrowLeft size={16} />
+          <span>Quay lại Hộp thư</span>
         </button>
-        <span className="text-sm text-gray-500">Tìm thấy {results.length} kết quả</span>
+        <span style={{ fontSize: '12px', color: 'var(--text-tertiary)' }}>
+          Tìm thấy {results.length} kết quả
+        </span>
       </div>
 
       {/* Results list */}
-      <div className="space-y-2 max-h-screen overflow-y-auto">
+      <div className="flex-1 overflow-y-auto p-3 space-y-2.5">
         {results.map((email) => (
-          <div key={email.id} className="border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden hover:shadow-md transition-shadow" style={{ backgroundColor: 'var(--bg-secondary)' }}>
+          <div
+            key={email.id}
+            className="rounded-lg border overflow-hidden"
+            style={{
+              borderColor: 'var(--border-primary)',
+              backgroundColor: 'var(--bg-secondary)',
+            }}
+          >
             {/* Email header */}
-            <div className="p-3 border-b" style={{ borderColor: 'var(--border-primary)', backgroundColor: 'var(--bg-secondary)' }}>
-              <div className="flex items-start justify-between">
+            <div
+              className="px-3 py-2 border-b"
+              style={{ borderColor: 'var(--border-primary)' }}
+            >
+              <div className="flex items-start justify-between gap-2">
                 <div className="flex-1 min-w-0">
-                  <p className="font-medium truncate" style={{ color: 'var(--text-primary)' }}>
+                  <p
+                    className="font-medium truncate"
+                    style={{ color: 'var(--text-primary)', fontSize: '13px' }}
+                  >
                     {email.sender}
                   </p>
-                  <p className="text-sm truncate" style={{ color: 'var(--text-secondary)' }}>
+                  <p
+                    className="truncate mt-0.5"
+                    style={{ color: 'var(--text-secondary)', fontSize: '12px' }}
+                  >
                     {email.subject}
                   </p>
                 </div>
                 {email.score !== undefined && (
-                  <div className="ml-2 px-2 py-1 rounded text-xs font-medium whitespace-nowrap" style={{ backgroundColor: 'var(--bg-hover)', color: 'var(--accent-primary)' }}>
-                    Relevance: {Math.round((1 - email.score) * 100)}%
-                  </div>
+                  <span
+                    className="flex-shrink-0 px-1.5 py-0.5 rounded"
+                    style={{
+                      backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                      color: 'var(--accent-primary)',
+                      fontSize: '11px',
+                    }}
+                  >
+                    {Math.round((1 - email.score) * 100)}%
+                  </span>
                 )}
               </div>
             </div>
 
-            {/* Email preview + View button */}
-            <div className="p-3 space-y-2">
-              <p className="text-sm line-clamp-2" style={{ color: 'var(--text-secondary)' }}>
+            {/* Email preview + tags + button */}
+            <div className="px-3 py-2 space-y-2">
+              <p
+                className="line-clamp-2"
+                style={{ color: 'var(--text-secondary)', fontSize: '12px', lineHeight: '1.4' }}
+              >
                 {email.snippet}
               </p>
-              {email.matchedFields && email.matchedFields.length > 0 && (
-                <div className="flex flex-wrap gap-1">
-                  {email.matchedFields.map((field) => (
-                    <span
-                      key={field}
-                      className="text-xs px-2 py-1 rounded"
-                      style={{ backgroundColor: 'var(--bg-hover)', color: 'var(--accent-primary)' }}
-                    >
-                      {field}
-                    </span>
-                  ))}
-                </div>
-              )}
-              {/* View button */}
+
+
+
+              {/* View button - nhỏ gọn hơn */}
               <button
-                onClick={() => {
-                  console.log('[SearchResultsList] Button clicked, email:', email);
-                  console.log('[SearchResultsList] onSelectEmail callback:', onSelectEmail);
-                  onSelectEmail?.(email);
-                }}
-                className="mt-2 w-full px-3 py-2 rounded text-sm font-medium transition-colors"
-                style={{ 
+                onClick={() => onSelectEmail?.(email)}
+                className="w-full py-1.5 rounded transition-opacity"
+                style={{
                   backgroundColor: 'var(--accent-primary)',
                   color: 'white',
+                  fontSize: '12px',
                 }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.backgroundColor = 'var(--accent-primary-hover)';
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.backgroundColor = 'var(--accent-primary)';
-                }}
+                onMouseEnter={(e) => { e.currentTarget.style.opacity = '0.9'; }}
+                onMouseLeave={(e) => { e.currentTarget.style.opacity = '1'; }}
               >
                 Xem chi tiết
               </button>

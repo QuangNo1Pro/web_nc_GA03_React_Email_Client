@@ -40,12 +40,23 @@ export const parseAttachments = (parts: any[]): any[] => {
     if (part.parts) {
       attachments = attachments.concat(parseAttachments(part.parts));
     }
+    // Check if it's an attachment or inline image (has filename and body.attachmentId)
     if (part.filename && part.body?.attachmentId) {
+      let contentId = '';
+      if (part.headers) {
+        const cidHeader = part.headers.find((h: any) => h.name.toLowerCase() === 'content-id');
+        if (cidHeader) {
+          // Remove angle brackets <...>
+          contentId = cidHeader.value.replace(/^<|>$/g, '');
+        }
+      }
+
       attachments.push({
         attachmentId: part.body.attachmentId,
         filename: part.filename,
         mimeType: part.mimeType,
         size: part.body.size,
+        contentId: contentId, // New field for Inline Image logic
       });
     }
   });

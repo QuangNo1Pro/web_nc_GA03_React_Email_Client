@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { CircleX, Search } from 'lucide-react';
+import { CircleX, Search, Zap, Brain } from 'lucide-react';
 import { getSearchSuggestions } from '../services/searchService';
 import { SearchModeSelector, SearchMode, useSearchMode } from './SearchModeSelector';
 
@@ -10,6 +10,7 @@ interface SearchBarProps {
   placeholder?: string;
   label?: string; // Optional: current mailbox/label for suggestions filtering
   showModeSelector?: boolean; // Show search mode toggle
+  value?: string; // Controlled value from parent
 }
 
 /**
@@ -27,8 +28,19 @@ export function SearchBar({
   placeholder = 'Tìm kiếm email...',
   label,
   showModeSelector = false,
+  value = '',
 }: SearchBarProps) {
-  const [query, setQuery] = useState('');
+  const [query, setQuery] = useState(value);
+
+  // Sync query with external value prop
+  useEffect(() => {
+    setQuery(value);
+  }, [value]);
+
+  // Reset query when label (mailbox) changes
+  useEffect(() => {
+    setQuery('');
+  }, [label]);
   const [suggestions, setSuggestions] = useState<{
     senders: string[];
     subjects: string[];
@@ -164,93 +176,84 @@ export function SearchBar({
     setSelectedSuggestionIndex(-1);
   };
 
-  return (
-    <div className="relative space-y-2">
-      {/* Search mode selector */}
-      {showModeSelector && (
-        <div className="flex justify-end px-1">
-          <SearchModeSelector mode={searchMode} onChange={setSearchMode} size="sm" />
-        </div>
-      )}
+  // Toggle search mode
+  const toggleSearchMode = () => {
+    const newMode = searchMode === 'fuzzy' ? 'semantic' : 'fuzzy';
+    setSearchMode(newMode);
+  };
 
-      {/* Search input */}
-      <div
-        className="flex items-center gap-2 px-3 py-2 border rounded-lg focus-within:ring-2 focus-within:ring-blue-500"
-        style={{
-          backgroundColor: 'var(--bg-secondary)',
-          borderColor: 'var(--border-primary)',
-        }}
-      >
-        <Search size={18} style={{ color: 'var(--text-tertiary)' }} />
-        <input
-          ref={inputRef}
-          type="text"
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          onKeyDown={handleKeyDown}
-          placeholder={placeholder}
-          disabled={isLoading}
+  return (
+    <div className="relative">
+      {/* Container for search bar + toggle */}
+      <div className="flex items-center gap-2">
+        {/* Search input */}
+        <div
+          className="flex-1 flex items-center gap-2 px-2 py-1 border rounded-lg focus-within:ring-1 focus-within:ring-blue-400 focus-within:border-blue-400 transition-all"
           style={{
-            flex: 1,
-            outline: 'none',
-            backgroundColor: 'transparent',
-            color: 'var(--text-primary)',
+            backgroundColor: 'var(--bg-secondary)',
+            borderColor: 'var(--border-primary)',
           }}
-          className="placeholder-gray-500 dark:placeholder-gray-400"
-          autoComplete="off"
-        />
-        {/* Search button - click để search */}
-        {query.trim() && !isLoading && !showSuggestions && (
-          <button
-            onClick={() => {
-              console.log('[SearchBar] 🔍 Click search button for:', query.trim());
-              onSearch(query.trim());
-            }}
-            className="p-1 rounded transition-colors"
-            style={{
-              color: 'var(--accent-primary)',
-              backgroundColor: 'transparent',
-            }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.backgroundColor = 'var(--bg-hover)';
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.backgroundColor = 'transparent';
-            }}
-            title="Tìm kiếm (hoặc nhấn Enter)"
-          >
-            <Search size={18} />
-          </button>
-        )}
-        {/* Clear button */}
-        {query && (
-          <button
-            onClick={handleClear}
+        >
+          <Search size={15} style={{ color: 'var(--text-tertiary)', flexShrink: 0 }} />
+          <input
+            ref={inputRef}
+            type="text"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            onKeyDown={handleKeyDown}
+            placeholder={placeholder}
             disabled={isLoading}
-            className="p-1 rounded transition-colors"
             style={{
-              color: 'var(--text-tertiary)',
+              flex: 1,
+              outline: 'none',
               backgroundColor: 'transparent',
+              color: 'var(--text-primary)',
+              fontSize: '14px',
+              minWidth: 0,
             }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.backgroundColor = 'var(--bg-hover)';
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.backgroundColor = 'transparent';
-            }}
-            title="Xóa tìm kiếm"
-          >
-            <CircleX size={18} />
-          </button>
-        )}
-        {(isLoading || loadingSuggestions) && (
-          <div
-            className="w-4 h-4 rounded-full animate-spin"
-            style={{
-              border: '2px solid transparent',
-              borderTopColor: 'var(--accent-primary)',
-            }}
+            className="placeholder-gray-400 dark:placeholder-gray-500"
+            autoComplete="off"
           />
+
+          {/* Loading spinner */}
+          {(isLoading || loadingSuggestions) && (
+            <div
+              className="w-4 h-4 rounded-full animate-spin flex-shrink-0"
+              style={{
+                border: '2px solid transparent',
+                borderTopColor: 'var(--accent-primary)',
+              }}
+            />
+          )}
+
+          {/* Clear button */}
+          {query && !isLoading && (
+            <button
+              onClick={handleClear}
+              className="p-1 rounded transition-colors flex-shrink-0 hover:bg-gray-200 dark:hover:bg-gray-700"
+              style={{ color: 'var(--text-tertiary)' }}
+              title="Xóa"
+            >
+              <CircleX size={16} />
+            </button>
+          )}
+        </div>
+
+        {/* Search mode toggle - outside search bar */}
+        {showModeSelector && (
+          <button
+            onClick={toggleSearchMode}
+            className="px-2.5 py-2 rounded-md transition-all flex-shrink-0"
+            style={{
+              backgroundColor: searchMode === 'semantic' ? 'rgba(147, 51, 234, 0.12)' : 'rgba(59, 130, 246, 0.12)',
+              color: searchMode === 'semantic' ? 'rgb(147, 51, 234)' : 'rgb(59, 130, 246)',
+              fontSize: '12px',
+              fontWeight: 500,
+            }}
+            title={searchMode === 'fuzzy' ? 'Click để đổi sang Semantic Search' : 'Click để đổi sang Fuzzy Search'}
+          >
+            {searchMode === 'fuzzy' ? 'Fuzzy' : 'Semantic'}
+          </button>
         )}
       </div>
 
@@ -278,7 +281,7 @@ export function SearchBar({
                   borderBottom: `1px solid var(--border-primary)`,
                 }}
               >
-                👤 Senders
+                SENDERS
               </div>
               {suggestions.senders.map((sender, idx) => {
                 const absoluteIdx = idx;
@@ -321,7 +324,7 @@ export function SearchBar({
                   borderBottom: `1px solid var(--border-primary)`,
                 }}
               >
-                📧 Subjects
+                SUBJECTS
               </div>
               {suggestions.subjects.map((subject, idx) => {
                 const absoluteIdx = suggestions.senders.length + idx;

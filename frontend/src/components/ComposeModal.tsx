@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import QuillEditor from './QuillEditor';
 import MaterialIcon from './MaterialIcon';
 
@@ -51,12 +51,29 @@ const ComposeModal: React.FC<ComposeModalProps> = ({
   isSending,
   handleSendEmail,
 }) => {
+  // Ctrl+Enter to send email
+  useEffect(() => {
+    if (!showComposeModal) return;
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+        e.preventDefault();
+        if (!isSending) {
+          handleSendEmail();
+        }
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [showComposeModal, isSending, handleSendEmail]);
+
   if (!showComposeModal) return null;
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center p-4"
       style={{ backgroundColor: 'rgba(0, 0, 0, 0.4)' }}
-      onClick={setShowComposeModal}
+      onClick={() => setShowComposeModal()}
     >
       <div
         className="w-full max-w-3xl flex flex-col rounded-lg overflow-hidden shadow-2xl"
@@ -84,7 +101,7 @@ const ComposeModal: React.FC<ComposeModalProps> = ({
             </span>
           </div>
           <button
-            onClick={setShowComposeModal}
+            onClick={() => setShowComposeModal()}
             className="p-2 rounded-lg transition-colors"
             style={{ color: 'var(--text-secondary)' }}
             onMouseEnter={(e) => {
