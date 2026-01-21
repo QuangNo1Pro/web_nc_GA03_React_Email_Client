@@ -18,6 +18,8 @@ export interface EmailDocument extends Document {
   summarizedAt?: Date; // Timestamp when summary was generated
   // Full text content extracted from HTML for easy reading
   textContent?: string;
+  // Attachment detection flag (for filtering)
+  hasAttachment?: boolean;
 
   // Virtual field for clarity when calling Gmail API
   readonly gmailMessageId?: string; // Alias for messageId
@@ -42,6 +44,8 @@ export const EmailSchema = new Schema(
     summarizedAt: { type: Date, default: null },
     // Full text content extracted from HTML/plain for easy reading
     textContent: { type: String, default: null },
+    // Attachment detection flag
+    hasAttachment: { type: Boolean, default: false },
   },
   {
     timestamps: true,

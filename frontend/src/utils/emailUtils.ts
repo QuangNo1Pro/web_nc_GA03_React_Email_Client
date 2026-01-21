@@ -104,6 +104,8 @@ export const parseEmail = (email: any) => {
       snoozed: email.snoozed || false,
       snoozedUntil: email.snoozedUntil || null,
       snoozedFromStatus: email.snoozedFromStatus || null,
+      // Attachment detection: use backend-computed value or derive from attachments array
+      hasAttachment: email.hasAttachment ?? ((email.attachments?.length ?? 0) > 0),
     };
   }
 
@@ -150,5 +152,7 @@ export const parseEmail = (email: any) => {
     snoozed: email.snoozed || false,
     snoozedUntil: email.snoozedUntil || null,
     snoozedFromStatus: email.snoozedFromStatus || null,
+    // Attachment detection from backend
+    hasAttachment: email.hasAttachment ?? false,
   };
 };

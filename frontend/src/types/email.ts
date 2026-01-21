@@ -27,6 +27,7 @@ export interface Email {
   cc?: string;
   bcc?: string;
   attachments?: any[];
+  hasAttachment?: boolean; // Backend-computed flag for attachment presence
   // FEATURE III: Snooze fields
   snoozed?: boolean;
   snoozedUntil?: string | null; // ISO timestamp

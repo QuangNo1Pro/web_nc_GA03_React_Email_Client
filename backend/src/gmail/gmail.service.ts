@@ -264,6 +264,8 @@ export class GmailService {
               snoozed: e.snoozed || false,
               snoozedUntil: e.snoozedUntil || null,
               snoozedFromStatus: e.snoozedFromStatus || null,
+              // Attachment detection: use stored value or compute from payload
+              hasAttachment: e.hasAttachment ?? this.hasAttachmentFromPayload(e.payload),
             })),
             nextPageToken: undefined,
           };
@@ -376,14 +378,15 @@ export class GmailService {
               return null;
             }
             try {
+              // CRITICAL: Use 'full' format to get payload.parts for attachment detection
               const msg = await gmail.users.messages.get({
                 userId: 'me',
                 id: message.id,
-                format: 'metadata',
-                metadataHeaders: ['From', 'To', 'Subject', 'Date'],
+                format: 'full', // Changed from 'metadata' to include parts for attachment detection
               });
               const status = this.inferStatusFromLabels(msg.data.labelIds || []);
-              console.log(`[getEmails] Email ${msg.data.id} labels:`, msg.data.labelIds, '→ status:', status);
+              const hasAttachment = this.hasAttachmentFromPayload(msg.data.payload);
+              console.log(`[getEmails] Email ${msg.data.id} labels:`, msg.data.labelIds, '→ status:', status, 'hasAttachment:', hasAttachment);
               return {
                 id: msg.data.id,
                 snippet: msg.data.snippet,
@@ -392,6 +395,8 @@ export class GmailService {
                 internalDate: msg.data.internalDate,
                 // CRITICAL: Infer status for emails fetched from Gmail API (not in DB yet)
                 status: status,
+                // Attachment detection
+                hasAttachment: hasAttachment,
               };
             } catch (err) {
               console.warn(`Failed to get message details for ${message.id}:`, (err as any)?.message || err);
@@ -527,6 +532,42 @@ export class GmailService {
       }
     });
     return headerObject;
+  }
+
+  /**
+   * Check if email has attachments from payload.parts
+   * Recursively checks all parts for filename (indicates attachment)
+   */
+  private hasAttachmentFromPayload(payload: any): boolean {
+    if (!payload) return false;
+
+    const checkParts = (parts: any[]): boolean => {
+      if (!parts || !Array.isArray(parts)) return false;
+
+      for (const part of parts) {
+        // If part has a filename and attachmentId, it's an attachment
+        if (part.filename && part.filename.length > 0 && part.body?.attachmentId) {
+          return true;
+        }
+        // Recursively check nested parts
+        if (part.parts && checkParts(part.parts)) {
+          return true;
+        }
+      }
+      return false;
+    };
+
+    // Check top-level parts
+    if (payload.parts) {
+      return checkParts(payload.parts);
+    }
+
+    // Check if the payload itself is an attachment (unlikely but handle edge case)
+    if (payload.filename && payload.filename.length > 0 && payload.body?.attachmentId) {
+      return true;
+    }
+
+    return false;
   }
 
   /**

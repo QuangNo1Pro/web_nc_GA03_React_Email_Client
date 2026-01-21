@@ -371,12 +371,14 @@ const KanbanBoard: React.FC<{
         matchedFields: result.matchedFields,
         status: status,
         attachments: result.attachments || existingEmail?.attachments || [],
+        // Use hasAttachment from backend (computed from payload) or fallback to attachments array
+        hasAttachment: result.hasAttachment ?? existingEmail?.hasAttachment ?? ((result.attachments?.length || 0) > 0),
         ...result,
       };
     });
     // Filter
     if (filterUnread) arr = arr.filter(e => !e.read);
-    if (filterHasAttachment) arr = arr.filter(e => (e.attachments && e.attachments.length > 0));
+    if (filterHasAttachment) arr = arr.filter(e => e.hasAttachment === true);
     if (filterSender.trim()) arr = arr.filter(e => e.sender?.toLowerCase().includes(filterSender.trim().toLowerCase()));
     // Sort
     arr = arr.slice();
@@ -415,7 +417,7 @@ const KanbanBoard: React.FC<{
         // Áp dụng filter/sort cho emails từng cột khi không search
         let emails = col.emails;
         if (filterUnread) emails = emails.filter(e => !e.read);
-        if (filterHasAttachment) emails = emails.filter(e => (e.attachments && e.attachments.length > 0));
+        if (filterHasAttachment) emails = emails.filter(e => e.hasAttachment === true);
         if (filterSender.trim()) emails = emails.filter(e => e.sender?.toLowerCase().includes(filterSender.trim().toLowerCase()));
         emails = emails.slice();
         emails.sort((a, b) => {

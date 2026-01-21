@@ -21,6 +21,11 @@ const Sidebar: React.FC<SidebarProps> = ({
 }) => {
   const { theme, toggleTheme } = useTheme();
   const [showProfileMenu, setShowProfileMenu] = useState(false);
+  const [imgError, setImgError] = useState(false);
+
+  React.useEffect(() => {
+    setImgError(false);
+  }, [user?.picture]);
 
   const mailboxIcons: Record<string, string> = {
     INBOX: 'inbox',
@@ -41,10 +46,10 @@ const Sidebar: React.FC<SidebarProps> = ({
   };
 
   return (
-    <aside 
+    <aside
       className="flex flex-col h-full border-r transition-colors duration-200"
-      style={{ 
-        backgroundColor: 'var(--bg-primary)', 
+      style={{
+        backgroundColor: 'var(--bg-primary)',
         borderColor: 'var(--border-primary)',
         width: '256px'
       }}
@@ -57,11 +62,12 @@ const Sidebar: React.FC<SidebarProps> = ({
             className="w-full flex items-center gap-3 px-3 py-2 rounded-lg transition-colors duration-150"
             style={{ color: 'var(--text-primary)' }}
           >
-            {user?.picture ? (
+            {user?.picture && !imgError ? (
               <img
                 src={user.picture}
                 alt={user.name || user.email}
                 className="w-10 h-10 rounded-full object-cover"
+                onError={() => setImgError(true)}
               />
             ) : (
               <div
@@ -86,7 +92,7 @@ const Sidebar: React.FC<SidebarProps> = ({
           {showProfileMenu && (
             <div
               className="absolute top-full left-0 right-0 mt-2 rounded-lg overflow-hidden shadow-lg z-50"
-              style={{ 
+              style={{
                 backgroundColor: 'var(--bg-primary)',
                 border: '1px solid var(--border-primary)',
                 boxShadow: '0 4px 12px rgba(0,0,0,0.15)'
@@ -152,7 +158,7 @@ const Sidebar: React.FC<SidebarProps> = ({
         {mailboxes.map((mailbox) => {
           const isSelected = selectedMailbox === mailbox.id;
           const icon = mailboxIcons[mailbox.id] || 'folder';
-          
+
           return (
             <button
               key={mailbox.id}
@@ -173,8 +179,8 @@ const Sidebar: React.FC<SidebarProps> = ({
                 }
               }}
             >
-              <MaterialIcon 
-                name={icon} 
+              <MaterialIcon
+                name={icon}
                 className={isSelected ? 'filled' : ''}
               />
               <span className="flex-1 text-left text-sm font-medium">
@@ -197,7 +203,7 @@ const Sidebar: React.FC<SidebarProps> = ({
       </nav>
 
       {/* Footer */}
-      <div className="p-4 border-t text-xs text-center" style={{ 
+      <div className="p-4 border-t text-xs text-center" style={{
         borderColor: 'var(--border-primary)',
         color: 'var(--text-tertiary)'
       }}>
